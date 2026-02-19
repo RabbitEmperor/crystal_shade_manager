@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "dgSpecHash": "Gj4cyIllA2s=",
+  "success": true,
+  "projectFilePath": "/home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/crystal_shade_manager.csproj",
+  "expectedPackageFiles": [
+    "/home/rabbit-emperor/.nuget/packages/google.apis/1.72.0/google.apis.1.72.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/google.apis.auth/1.72.0/google.apis.auth.1.72.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/google.apis.core/1.72.0/google.apis.core.1.72.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/google.apis.sheets.v4/1.72.0.3966/google.apis.sheets.v4.1.72.0.3966.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.configuration.abstractions/8.0.0/microsoft.extensions.configuration.abstractions.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.configuration.binder/8.0.0/microsoft.extensions.configuration.binder.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/8.0.0/microsoft.extensions.dependencyinjection.abstractions.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.options/8.0.0/microsoft.extensions.options.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.options.configurationextensions/8.0.0/microsoft.extensions.options.configurationextensions.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.extensions.primitives/8.0.0/microsoft.extensions.primitives.8.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/newtonsoft.json/13.0.4/newtonsoft.json.13.0.4.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/system.codedom/7.0.0/system.codedom.7.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/system.management/7.0.2/system.management.7.0.2.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/telegram.bot/22.0.0/telegram.bot.22.0.0.nupkg.sha512",
+    "/home/rabbit-emperor/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.3/microsoft.aspnetcore.app.ref.10.0.3.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "crystal_shade_manager depends on Telegram.Bot (>= 21.11.0) but Telegram.Bot 21.11.0 was not found. Telegram.Bot 22.0.0 was resolved instead.",
+      "projectPath": "/home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/crystal_shade_manager.csproj",
+      "warningLevel": 1,
+      "filePath": "/home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/crystal_shade_manager.csproj",
+      "libraryId": "Telegram.Bot",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}
