@@ -33,12 +33,62 @@ public class BotUpdateHandler
         }
     }
 
+    // --- НОВА ФУНКЦІЯ ПЕРЕВІРКИ НА АДМІНА ---
+    private async Task<bool> IsAdminAsync(ITelegramBotClient bot, long chatId, long userId, CancellationToken token)
+    {
+        try
+        {
+            var chat = await bot.GetChatAsync(chatId, token);
+            // Якщо ви пишете боту в особисті повідомлення (не в групу) - ви автоматично адмін
+            if (chat.Type == ChatType.Private) return true;
+
+            var member = await bot.GetChatMemberAsync(chatId, userId, token);
+            return member.Status == ChatMemberStatus.Administrator || member.Status == ChatMemberStatus.Creator;
+        }
+        catch
+        {
+            return false; // Якщо сталася помилка перевірки (наприклад, бот не має прав) - забороняємо
+        }
+    }
+
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
+        // 1. ОБРОБКА ТЕКСТОВИХ КОМАНД
         if (update.Type == UpdateType.Message && update.Message?.Text != null)
         {
             var message = update.Message;
             var text = message.Text;
+
+            // Перевіряємо, чи це взагалі команда
+            if (text.StartsWith("/"))
+            {
+                // Перевіряємо права доступу
+                bool isAdmin = await IsAdminAsync(bot, message.Chat.Id, message.From!.Id, token);
+                if (!isAdmin)
+                {
+                    // Бот просто ігнорує звичайних користувачів (можна розкоментувати рядок нижче, щоб він сварився)
+                    // await bot.SendTextMessageAsync(message.Chat.Id, "❌ У вас немає прав для керування ботом.", cancellationToken: token);
+                    return;
+                }
+            }
+
+            if (text.StartsWith("/help"))
+            {
+                string helpText = 
+                    "🤖 <b>Довідка по Crystal Manager</b> 🤖\n\n" +
+                    "Цей бот створений для зручного контролю та розсилки завдань рабам команди.\n\n" +
+                    "📌 <b>Доступні команди (тільки для адмінів):</b>\n" +
+                    "🔹 /rise_up — відкриває панель керування розсилкою.\n" +
+                    "🔹 /refresh — примусово оновлює базу даних з Google Таблиці.\n" +
+                    "🔹 /help — показує це повідомлення.\n\n" +
+                    "⚙️ <b>Як це працює:</b>\n" +
+                    "1. Бот бере до уваги <b>тільки</b> тих людей, які вписані у вкладку «Команда».\n" +
+                    "2. У списки потрапляють лише завдання зі статусом «<i>виконується</i>» або «<i>правки</i>».\n" +
+                    "3. Завдання групуються по серіях.";
+
+                await bot.SendTextMessageAsync(message.Chat.Id, helpText, parseMode: ParseMode.Html, cancellationToken: token);
+                return;
+            }
 
             if (text.StartsWith("/refresh"))
             {
@@ -82,11 +132,21 @@ public class BotUpdateHandler
             }
         }
 
+        // 2. ОБРОБКА НАТИСКАННЯ КНОПОК
         if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
         {
             var cq = update.CallbackQuery;
             var msgId = cq.Message.MessageId;
             var chatId = cq.Message.Chat.Id;
+
+            // Перевіряємо, чи натиснув кнопку адмін
+            bool isAdmin = await IsAdminAsync(bot, chatId, cq.From.Id, token);
+            if (!isAdmin)
+            {
+                // Видаємо спливаюче вікно з помилкою прямо в Telegram
+                await bot.AnswerCallbackQueryAsync(cq.Id, "❌ Тільки адміністратори можуть натискати ці кнопки!", showAlert: true, cancellationToken: token);
+                return;
+            }
 
             try { await bot.AnswerCallbackQueryAsync(cq.Id, cancellationToken: token); } catch { }
 

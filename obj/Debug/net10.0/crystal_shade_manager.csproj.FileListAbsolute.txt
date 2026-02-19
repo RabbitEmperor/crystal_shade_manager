@@ -23,3 +23,4 @@
 /home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/bin/Debug/net10.0/System.CodeDom.dll
 /home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/bin/Debug/net10.0/System.Management.dll
 /home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/bin/Debug/net10.0/runtimes/win/lib/net7.0/System.Management.dll
+/home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/obj/Debug/net10.0/crystal_shade_manager.sourcelink.json
