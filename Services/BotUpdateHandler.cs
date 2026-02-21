@@ -15,11 +15,17 @@ public class BotUpdateHandler
 {
     private readonly IGoogleSheetsService _sheetsService;
     private Dictionary<string, List<string>> _cachedUserMessages = new();
-    private readonly ConcurrentDictionary<int, RiseUpSession> _activeSessions = new();
+    
+    private readonly ConcurrentDictionary<string, RiseUpSession> _activeSessions = new();
+    
+    // Словник налаштувань тепер буде братися з файлу
+    private readonly ConcurrentDictionary<long, BotSettings> _chatSettings;
 
     public BotUpdateHandler(IGoogleSheetsService sheetsService)
     {
         _sheetsService = sheetsService;
+        // Завантажуємо збережені налаштування з жорсткого диска при запуску
+        _chatSettings = SettingsManager.Load(); 
     }
 
     public async Task InitializeCacheAsync()
@@ -33,13 +39,22 @@ public class BotUpdateHandler
         }
     }
 
-    // --- НОВА ФУНКЦІЯ ПЕРЕВІРКИ НА АДМІНА ---
+    private BotSettings GetSettings(long chatId)
+    {
+        return _chatSettings.GetOrAdd(chatId, _ => 
+        {
+            var newSettings = new BotSettings();
+            // Якщо додався новий чат — відразу зберігаємо це у файл
+            SettingsManager.Save(_chatSettings); 
+            return newSettings;
+        });
+    }
+
     private async Task<bool> IsAdminAsync(ITelegramBotClient bot, long chatId, long userId, CancellationToken token)
     {
         try
         {
             var chat = await bot.GetChatAsync(chatId, token);
-            // Якщо ви пишете боту в особисті повідомлення (не в групу) - ви автоматично адмін
             if (chat.Type == ChatType.Private) return true;
 
             var member = await bot.GetChatMemberAsync(chatId, userId, token);
@@ -47,60 +62,60 @@ public class BotUpdateHandler
         }
         catch
         {
-            return false; // Якщо сталася помилка перевірки (наприклад, бот не має прав) - забороняємо
+            return false;
         }
     }
 
     public async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken token)
     {
-        // 1. ОБРОБКА ТЕКСТОВИХ КОМАНД
         if (update.Type == UpdateType.Message && update.Message?.Text != null)
         {
             var message = update.Message;
             var text = message.Text;
+            var chatId = message.Chat.Id;
 
-            // Перевіряємо, чи це взагалі команда
             if (text.StartsWith("/"))
             {
-                // Перевіряємо права доступу
-                bool isAdmin = await IsAdminAsync(bot, message.Chat.Id, message.From!.Id, token);
-                if (!isAdmin)
-                {
-                    // Бот просто ігнорує звичайних користувачів (можна розкоментувати рядок нижче, щоб він сварився)
-                    // await bot.SendTextMessageAsync(message.Chat.Id, "❌ У вас немає прав для керування ботом.", cancellationToken: token);
-                    return;
-                }
+                bool isAdmin = await IsAdminAsync(bot, chatId, message.From!.Id, token);
+                if (!isAdmin) return; 
+            }
+
+            if (text.StartsWith("/setting"))
+            {
+                var settings = GetSettings(chatId);
+                var markup = KeyboardBuilder.BuildSettings(settings);
+                await bot.SendTextMessageAsync(chatId, "⚙️ <b>Налаштування бота (для цього чату):</b>\n<i>Зміни зберігаються автоматично</i>", 
+                    replyMarkup: markup, parseMode: ParseMode.Html, cancellationToken: token);
+                return;
             }
 
             if (text.StartsWith("/help"))
             {
                 string helpText = 
                     "🤖 <b>Довідка по Crystal Manager</b> 🤖\n\n" +
-                    "Цей бот створений для зручного контролю та розсилки завдань рабам команди.\n\n" +
-                    "📌 <b>Доступні команди (тільки для адмінів):</b>\n" +
+                    "📌 <b>Команди (тільки для адмінів):</b>\n" +
                     "🔹 /rise_up — відкриває панель керування розсилкою.\n" +
-                    "🔹 /refresh — примусово оновлює базу даних з Google Таблиці.\n" +
+                    "🔹 /setting — відкриває меню налаштувань бота.\n" +
+                    "🔹 /refresh — оновлює базу даних з Google Таблиці.\n" +
                     "🔹 /help — показує це повідомлення.\n\n" +
                     "⚙️ <b>Як це працює:</b>\n" +
-                    "1. Бот бере до уваги <b>тільки</b> тих людей, які вписані у вкладку «Команда».\n" +
-                    "2. У списки потрапляють лише завдання зі статусом «<i>виконується</i>» або «<i>правки</i>».\n" +
-                    "3. Завдання групуються по серіях.";
+                    "Бот бере до уваги тільки тих людей, які вписані у вкладку «Команда», і тільки завдання зі статусом «виконується» або «правки».";
 
-                await bot.SendTextMessageAsync(message.Chat.Id, helpText, parseMode: ParseMode.Html, cancellationToken: token);
+                await bot.SendTextMessageAsync(chatId, helpText, parseMode: ParseMode.Html, cancellationToken: token);
                 return;
             }
 
             if (text.StartsWith("/refresh"))
             {
-                var waitMsg = await bot.SendTextMessageAsync(message.Chat.Id, "🔄 Оновлюю базу даних з Google Таблиці...", cancellationToken: token);
+                var waitMsg = await bot.SendTextMessageAsync(chatId, "🔄 Оновлюю базу даних з Google Таблиці...", cancellationToken: token);
                 try 
                 {
                     _cachedUserMessages = await _sheetsService.GetUserTaskMessagesAsync() ?? new Dictionary<string, List<string>>();
-                    await bot.EditMessageTextAsync(message.Chat.Id, waitMsg.MessageId, $"✅ Базу оновлено! Активних рабів: {_cachedUserMessages.Count}", cancellationToken: token);
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"✅ Базу оновлено! Активних рабів: {_cachedUserMessages.Count}", cancellationToken: token);
                 }
                 catch (Exception ex) 
                 {
-                    await bot.EditMessageTextAsync(message.Chat.Id, waitMsg.MessageId, $"❌ Помилка оновлення: {ex.Message}", cancellationToken: token);
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"❌ Помилка оновлення: {ex.Message}", cancellationToken: token);
                 }
                 return;
             }
@@ -109,54 +124,71 @@ public class BotUpdateHandler
             {
                 if (_cachedUserMessages.Count == 0)
                 {
-                    await bot.SendTextMessageAsync(message.Chat.Id, "На даний момент треба набирати ще більше проєктів (Або пропишіть /refresh)", cancellationToken: token);
+                    await bot.SendTextMessageAsync(chatId, "На даний момент активних завдань немає (Або пропишіть /refresh)", cancellationToken: token);
                 }
                 else
                 {
+                    var settings = GetSettings(chatId);
                     var session = new RiseUpSession();
                     int index = 0;
                     foreach (var kvp in _cachedUserMessages)
                     {
                         session.Users.Add(kvp.Key);
-                        session.Toggles[index] = true;
+                        session.Toggles[index] = settings.SelectAllByDefault;
                         session.Messages[index] = kvp.Value;
                         index++;
                     }
                     
-                    var waitMsg = await bot.SendTextMessageAsync(message.Chat.Id, "📋 <b>Оберіть рабів для розсилки:</b>", 
+                    var waitMsg = await bot.SendTextMessageAsync(chatId, "📋 <b>Оберіть рабів для розсилки:</b>", 
                         replyMarkup: KeyboardBuilder.Build(session), parseMode: ParseMode.Html, cancellationToken: token);
                     
-                    _activeSessions[waitMsg.MessageId] = session;
+                    string sessionKey = $"{chatId}_{waitMsg.MessageId}";
+                    _activeSessions[sessionKey] = session;
                 }
                 return;
             }
         }
 
-        // 2. ОБРОБКА НАТИСКАННЯ КНОПОК
         if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
         {
             var cq = update.CallbackQuery;
             var msgId = cq.Message.MessageId;
             var chatId = cq.Message.Chat.Id;
 
-            // Перевіряємо, чи натиснув кнопку адмін
             bool isAdmin = await IsAdminAsync(bot, chatId, cq.From.Id, token);
             if (!isAdmin)
             {
-                // Видаємо спливаюче вікно з помилкою прямо в Telegram
                 await bot.AnswerCallbackQueryAsync(cq.Id, "❌ Тільки адміністратори можуть натискати ці кнопки!", showAlert: true, cancellationToken: token);
+                return;
+            }
+
+            if (cq.Data.StartsWith("set_"))
+            {
+                var settings = GetSettings(chatId);
+
+                if (cq.Data == "set_toggle_select")
+                    settings.SelectAllByDefault = !settings.SelectAllByDefault;
+                else if (cq.Data == "set_toggle_speed")
+                    settings.SafeModeDelay = !settings.SafeModeDelay;
+
+                // --- НАЙГОЛОВНІШЕ: Зберігаємо нові налаштування у файл! ---
+                SettingsManager.Save(_chatSettings);
+
+                try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.BuildSettings(settings), cancellationToken: token); } catch { }
+                try { await bot.AnswerCallbackQueryAsync(cq.Id, "Налаштування збережено!", cancellationToken: token); } catch { }
                 return;
             }
 
             try { await bot.AnswerCallbackQueryAsync(cq.Id, cancellationToken: token); } catch { }
 
-            if (!_activeSessions.ContainsKey(msgId))
+            string sessionKey = $"{chatId}_{msgId}";
+            if (!_activeSessions.ContainsKey(sessionKey))
             {
                 try { await bot.SendTextMessageAsync(chatId, "Ця сесія вже застаріла. Пропишіть /rise_up ще раз.", cancellationToken: token); } catch { }
                 return;
             }
 
-            var session = _activeSessions[msgId];
+            var session = _activeSessions[sessionKey];
 
             if (cq.Data.StartsWith("t_"))
             {
@@ -168,7 +200,10 @@ public class BotUpdateHandler
             else if (cq.Data == "send")
             {
                 await bot.EditMessageTextAsync(chatId, msgId, "🚀 Розсилаю завдання обраним (працюю у фоні)...", cancellationToken: token);
-                _activeSessions.TryRemove(msgId, out _);
+                _activeSessions.TryRemove(sessionKey, out _);
+
+                var settings = GetSettings(chatId);
+                int delayTime = settings.SafeModeDelay ? 3100 : 1500;
 
                 _ = Task.Run(async () => 
                 {
@@ -183,15 +218,30 @@ public class BotUpdateHandler
                                 
                                 foreach (var msgText in messagesToSend)
                                 {
-                                    try 
+                                    bool isSent = false;
+                                    int retries = 0;
+
+                                    while (!isSent && retries < 3)
                                     {
-                                        await bot.SendTextMessageAsync(chatId, msgText, parseMode: ParseMode.Html, cancellationToken: token);
-                                        await Task.Delay(1500, token); 
-                                    }
-                                    catch (Exception e)
-                                    {
-                                        Console.WriteLine($"Не вдалося відправити повідомлення: {e.Message}");
-                                        await Task.Delay(2000, token); 
+                                        try 
+                                        {
+                                            await bot.SendTextMessageAsync(chatId, msgText, parseMode: ParseMode.Html, cancellationToken: token);
+                                            isSent = true; 
+                                            await Task.Delay(delayTime, token); 
+                                        }
+                                        catch (Telegram.Bot.Exceptions.ApiRequestException apiEx) when (apiEx.ErrorCode == 429)
+                                        {
+                                            int retryAfter = apiEx.Parameters?.RetryAfter ?? 10;
+                                            Console.WriteLine($"[Антиспам] Telegram просить паузу. Чекаю {retryAfter} секунд...");
+                                            await Task.Delay((retryAfter * 1000) + 500, token);
+                                            retries++;
+                                        }
+                                        catch (Exception e)
+                                        {
+                                            Console.WriteLine($"Не вдалося відправити повідомлення: {e.Message}");
+                                            await Task.Delay(3000, token); 
+                                            retries++;
+                                        }
                                     }
                                 }
                             }

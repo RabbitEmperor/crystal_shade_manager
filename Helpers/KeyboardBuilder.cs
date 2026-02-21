@@ -6,6 +6,7 @@ namespace crystal_shade_manager.Helpers;
 
 public static class KeyboardBuilder
 {
+    // Клавіатура для меню розсилки
     public static InlineKeyboardMarkup Build(RiseUpSession session)
     {
         var rows = new List<InlineKeyboardButton[]>();
@@ -35,5 +36,18 @@ public static class KeyboardBuilder
         rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🚀 Розпочати розсилку", "send") });
 
         return new InlineKeyboardMarkup(rows);
+    }
+
+    // --- НОВА КЛАВІАТУРА ДЛЯ МЕНЮ НАЛАШТУВАНЬ ---
+    public static InlineKeyboardMarkup BuildSettings(BotSettings settings)
+    {
+        var selectAllText = settings.SelectAllByDefault ? "✅ Виділяти всіх рабів при старті" : "❌ Не виділяти нікого при старті";
+        var speedText = settings.SafeModeDelay ? "🐢 Швидкість: БЕЗПЕЧНА (3 сек)" : "🚀 Швидкість: ШВИДКА (1.5 сек)";
+
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[] { InlineKeyboardButton.WithCallbackData(selectAllText, "set_toggle_select") },
+            new[] { InlineKeyboardButton.WithCallbackData(speedText, "set_toggle_speed") }
+        });
     }
 }
