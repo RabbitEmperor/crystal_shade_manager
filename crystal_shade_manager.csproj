@@ -10,6 +10,9 @@
     <ItemGroup>
       <PackageReference Include="Google.Apis.Sheets.v4" Version="1.72.0.3966" />
       <PackageReference Include="Telegram.Bot" Version="21.11.0" />
+        <None Update="credentials.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
 </Project>

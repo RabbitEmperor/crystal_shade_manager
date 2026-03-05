@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq; // Обов'язково для роботи команди /corrections!
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
@@ -17,14 +18,11 @@ public class BotUpdateHandler
     private Dictionary<string, List<string>> _cachedUserMessages = new();
     
     private readonly ConcurrentDictionary<string, RiseUpSession> _activeSessions = new();
-    
-    // Словник налаштувань тепер буде братися з файлу
     private readonly ConcurrentDictionary<long, BotSettings> _chatSettings;
 
     public BotUpdateHandler(IGoogleSheetsService sheetsService)
     {
         _sheetsService = sheetsService;
-        // Завантажуємо збережені налаштування з жорсткого диска при запуску
         _chatSettings = SettingsManager.Load(); 
     }
 
@@ -44,7 +42,6 @@ public class BotUpdateHandler
         return _chatSettings.GetOrAdd(chatId, _ => 
         {
             var newSettings = new BotSettings();
-            // Якщо додався новий чат — відразу зберігаємо це у файл
             SettingsManager.Save(_chatSettings); 
             return newSettings;
         });
@@ -73,6 +70,7 @@ public class BotUpdateHandler
             var message = update.Message;
             var text = message.Text;
             var chatId = message.Chat.Id;
+            var threadId = message.MessageThreadId; // Отримуємо ID гілки (теми) для Форумів
 
             if (text.StartsWith("/"))
             {
@@ -85,6 +83,7 @@ public class BotUpdateHandler
                 var settings = GetSettings(chatId);
                 var markup = KeyboardBuilder.BuildSettings(settings);
                 await bot.SendTextMessageAsync(chatId, "⚙️ <b>Налаштування бота (для цього чату):</b>\n<i>Зміни зберігаються автоматично</i>", 
+                    messageThreadId: threadId, // Бот відповідає в ту саму гілку!
                     replyMarkup: markup, parseMode: ParseMode.Html, cancellationToken: token);
                 return;
             }
@@ -94,20 +93,23 @@ public class BotUpdateHandler
                 string helpText = 
                     "🤖 <b>Довідка по Crystal Manager</b> 🤖\n\n" +
                     "📌 <b>Команди (тільки для адмінів):</b>\n" +
-                    "🔹 /rise_up — відкриває панель керування розсилкою.\n" +
-                    "🔹 /setting — відкриває меню налаштувань бота.\n" +
+                    "🔹 /rise_up — відкриває панель керування розсилкою. І після тегає їх і вказує на незавершені завдання.\n" +
+                    "🔹 /setting — відкриває меню налаштувань бота. Поки тут нічого ноухау немає.\n" +
                     "🔹 /refresh — оновлює базу даних з Google Таблиці.\n" +
-                    "🔹 /help — показує це повідомлення.\n\n" +
-                    "⚙️ <b>Як це працює:</b>\n" +
-                    "Бот бере до уваги тільки тих людей, які вписані у вкладку «Команда», і тільки завдання зі статусом «виконується» або «правки».";
+                    "🔹 /cast — запис касту в таблицю. А точніше відповідаєш на повідомлення з акторами і ролями їхніми пишеш назва аркуша і номер серії і воно записує ці ролі і акторів в таблицю.\n" +
+                    "🔹 /corrections — запис правок в таблицю. Відповідаєш на повідомлення з правками в яких на початку повідомлення має вже стояти назва аркушу і номер серії і воно записує в примітки таймінги правок а також відмічає що акторові треба виконати правки.\n" +
+                    "🔹 /help — показує це повідомлення.";
 
-                await bot.SendTextMessageAsync(chatId, helpText, parseMode: ParseMode.Html, cancellationToken: token);
+                await bot.SendTextMessageAsync(chatId, helpText, 
+                    messageThreadId: threadId, 
+                    parseMode: ParseMode.Html, cancellationToken: token);
                 return;
             }
 
             if (text.StartsWith("/refresh"))
             {
-                var waitMsg = await bot.SendTextMessageAsync(chatId, "🔄 Оновлюю базу даних з Google Таблиці...", cancellationToken: token);
+                var waitMsg = await bot.SendTextMessageAsync(chatId, "🔄 Оновлюю базу даних з Google Таблиці...", 
+                    messageThreadId: threadId, cancellationToken: token);
                 try 
                 {
                     _cachedUserMessages = await _sheetsService.GetUserTaskMessagesAsync() ?? new Dictionary<string, List<string>>();
@@ -124,7 +126,8 @@ public class BotUpdateHandler
             {
                 if (_cachedUserMessages.Count == 0)
                 {
-                    await bot.SendTextMessageAsync(chatId, "На даний момент активних завдань немає (Або пропишіть /refresh)", cancellationToken: token);
+                    await bot.SendTextMessageAsync(chatId, "На даний момент активних завдань немає (Або пропишіть /refresh)", 
+                        messageThreadId: threadId, cancellationToken: token);
                 }
                 else
                 {
@@ -140,6 +143,7 @@ public class BotUpdateHandler
                     }
                     
                     var waitMsg = await bot.SendTextMessageAsync(chatId, "📋 <b>Оберіть рабів для розсилки:</b>", 
+                        messageThreadId: threadId, 
                         replyMarkup: KeyboardBuilder.Build(session), parseMode: ParseMode.Html, cancellationToken: token);
                     
                     string sessionKey = $"{chatId}_{waitMsg.MessageId}";
@@ -147,13 +151,154 @@ public class BotUpdateHandler
                 }
                 return;
             }
+
+            if (text.StartsWith("/cast"))
+            {
+                if (message.ReplyToMessage == null || string.IsNullOrEmpty(message.ReplyToMessage.Text))
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Команду /cast треба писати У ВІДПОВІДЬ (Reply) на повідомлення зі списком акторів.", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+
+                var args = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (args.Length < 3)
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Неправильний формат. Використовуйте: /cast НазваВкладки НомерСерії\nПриклад: /cast Зомбі 5", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+
+                string sheetName = args[1];
+                string episode = args[2];
+
+                var lines = message.ReplyToMessage.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                var castList = new List<(string Character, string Actor)>();
+                string deadline = "";
+
+                foreach (var line in lines)
+                {
+                    string cleanLine = line.Trim();
+                    int dashIndex = cleanLine.IndexOf('-');
+                    if (dashIndex > 0)
+                    {
+                        string character = cleanLine.Substring(0, dashIndex).Trim();
+                        string actor = cleanLine.Substring(dashIndex + 1).Trim();
+                        if (actor.StartsWith("@")) actor = actor.Substring(1);
+                        castList.Add((character, actor));
+                    }
+                    else
+                    {
+                        if (cleanLine.Any(char.IsDigit)) 
+                        {
+                            deadline = cleanLine;
+                        }
+                    }
+                }
+
+                if (castList.Count == 0)
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Не вдалося знайти акторів у повідомленні. Перевірте формат (Персонаж - Актор).", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+
+                var waitMsg = await bot.SendTextMessageAsync(chatId, $"⏳ Записую {castList.Count} ролей у вкладку '{sheetName}'...", 
+                    messageThreadId: threadId, cancellationToken: token);
+
+                try
+                {
+                    await _sheetsService.AddCastListAsync(sheetName, episode, castList, deadline);
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"✅ Успішно додано {castList.Count} записів у '{sheetName}' (Серія {episode})!", cancellationToken: token);
+                }
+                catch (Exception ex)
+                {
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"❌ Помилка запису в таблицю: {ex.Message}", cancellationToken: token);
+                }
+                return;
+            }
+
+            if (text.StartsWith("/corrections"))
+            {
+                if (message.ReplyToMessage == null || string.IsNullOrEmpty(message.ReplyToMessage.Text))
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Команду /corrections треба писати У ВІДПОВІДЬ (Reply) на повідомлення з правками.", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+
+                var lines = message.ReplyToMessage.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                if (lines.Length < 2) return;
+
+                var titleParts = lines[0].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (titleParts.Length < 2)
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Не знайдено назви проєкту та серії у першому рядку.\nФормат: САЙКІ 1", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+                
+                string episode = titleParts.Last();
+                string sheetName = string.Join(" ", titleParts.Take(titleParts.Length - 1));
+
+                var corrections = new Dictionary<string, List<string>>();
+                string currentTag = null;
+
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    
+                    if (line.StartsWith("@"))
+                    {
+                        currentTag = line;
+                        if (!corrections.ContainsKey(currentTag))
+                            corrections[currentTag] = new List<string>();
+                    }
+                    else if (!string.IsNullOrEmpty(currentTag))
+                    {
+                        int dashIndex = line.IndexOf('-');
+                        if (dashIndex > 0)
+                        {
+                            string timeCode = line.Substring(0, dashIndex).Trim();
+                            corrections[currentTag].Add(timeCode);
+                        }
+                        else
+                        {
+                            corrections[currentTag].Add(line);
+                        }
+                    }
+                }
+
+                if (corrections.Count == 0)
+                {
+                    await bot.SendTextMessageAsync(chatId, "❌ Не вдалося знайти теги акторів (@тег).", 
+                        messageThreadId: threadId, cancellationToken: token);
+                    return;
+                }
+
+                var waitMsg = await bot.SendTextMessageAsync(chatId, $"⏳ Записую правки для {corrections.Count} акторів у вкладку '{sheetName}'...", 
+                    messageThreadId: threadId, cancellationToken: token);
+
+                try
+                {
+                    await _sheetsService.UpdateCorrectionsAsync(sheetName, episode, corrections);
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"✅ Успішно додано правки у '{sheetName}' (Серія {episode})!", cancellationToken: token);
+                }
+                catch (Exception ex)
+                {
+                    await bot.EditMessageTextAsync(chatId, waitMsg.MessageId, $"❌ Помилка запису в таблицю: {ex.Message}", cancellationToken: token);
+                }
+                return;
+            }
         }
 
+        // Блок для кнопок (CallbackQuery)
         if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
         {
             var cq = update.CallbackQuery;
             var msgId = cq.Message.MessageId;
             var chatId = cq.Message.Chat.Id;
+            var threadId = cq.Message.MessageThreadId; // Отримуємо ID гілки для кнопок
 
             bool isAdmin = await IsAdminAsync(bot, chatId, cq.From.Id, token);
             if (!isAdmin)
@@ -171,7 +316,6 @@ public class BotUpdateHandler
                 else if (cq.Data == "set_toggle_speed")
                     settings.SafeModeDelay = !settings.SafeModeDelay;
 
-                // --- НАЙГОЛОВНІШЕ: Зберігаємо нові налаштування у файл! ---
                 SettingsManager.Save(_chatSettings);
 
                 try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.BuildSettings(settings), cancellationToken: token); } catch { }
@@ -184,7 +328,8 @@ public class BotUpdateHandler
             string sessionKey = $"{chatId}_{msgId}";
             if (!_activeSessions.ContainsKey(sessionKey))
             {
-                try { await bot.SendTextMessageAsync(chatId, "Ця сесія вже застаріла. Пропишіть /rise_up ще раз.", cancellationToken: token); } catch { }
+                try { await bot.SendTextMessageAsync(chatId, "Ця сесія вже застаріла. Пропишіть /rise_up ще раз.", 
+                    messageThreadId: threadId, cancellationToken: token); } catch { }
                 return;
             }
 
@@ -225,7 +370,9 @@ public class BotUpdateHandler
                                     {
                                         try 
                                         {
-                                            await bot.SendTextMessageAsync(chatId, msgText, parseMode: ParseMode.Html, cancellationToken: token);
+                                            await bot.SendTextMessageAsync(chatId, msgText, 
+                                                messageThreadId: threadId, // Бот розсилає відповіді в ту саму гілку
+                                                parseMode: ParseMode.Html, cancellationToken: token);
                                             isSent = true; 
                                             await Task.Delay(delayTime, token); 
                                         }
@@ -246,7 +393,9 @@ public class BotUpdateHandler
                                 }
                             }
                         }
-                        await bot.SendTextMessageAsync(chatId, "🏁 <b>Скликання завершено, бігом всі рабствувати</b>", parseMode: ParseMode.Html, cancellationToken: token);
+                        await bot.SendTextMessageAsync(chatId, "🏁 <b>Скликання завершено, бігом всі рабствувати</b>", 
+                            messageThreadId: threadId, 
+                            parseMode: ParseMode.Html, cancellationToken: token);
                     }
                     catch (Exception ex)
                     {
