@@ -28,5 +28,5 @@ botClient.StartReceiving(
 );
 
 Console.WriteLine("Бот працює. Натисніть Enter, щоб вийти.");
-Console.ReadLine();
+await Task.Delay(-1);
 cts.Cancel();
