@@ -4,7 +4,7 @@
     "SafeModeDelay": false
   },
   "-1003671675553": {
-    "SelectAllByDefault": true,
+    "SelectAllByDefault": false,
     "SafeModeDelay": false
   }
 }

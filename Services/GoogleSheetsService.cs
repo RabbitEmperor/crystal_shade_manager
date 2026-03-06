@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Services;
 using Google.Apis.Sheets.v4;
+using Google.Apis.Sheets.v4.Data;
 
 namespace crystal_shade_manager.Services;
 
@@ -13,11 +15,13 @@ public class GoogleSheetsService : IGoogleSheetsService
 {
     public async Task<Dictionary<string, List<string>>> GetUserTaskMessagesAsync()
     {
-        if (!System.IO.File.Exists(Config.CredentialsFile))
-            throw new System.IO.FileNotFoundException($"Файл {Config.CredentialsFile} не знайдено!");
+        string credentialsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Config.CredentialsFile);
+
+        if (!File.Exists(credentialsPath))
+            throw new FileNotFoundException($"Файл {credentialsPath} не знайдено!");  
 
         GoogleCredential credential;
-        using (var stream = new System.IO.FileStream(Config.CredentialsFile, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+        using (var stream = new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
         {
             credential = GoogleCredential.FromStream(stream).CreateScoped(SheetsService.Scope.SpreadsheetsReadonly);
         }
@@ -25,10 +29,10 @@ public class GoogleSheetsService : IGoogleSheetsService
         var service = new SheetsService(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
-            ApplicationName = "Crystal Manager"
+            ApplicationName = "Crystal Manager",
+            HttpClientFactory = new Google.Apis.Http.HttpClientFactory()
         });
 
-        // 1. Збираємо офіційний склад команди
         var userTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try 
         {
@@ -37,17 +41,13 @@ public class GoogleSheetsService : IGoogleSheetsService
             {
                 foreach (var row in teamData.Values)
                 {
-                    // Перевіряємо, чи є хоча б Нік (колонка A)
                     if (row.Count > 0 && row[0] != null)
                     {
                         var nick = row[0].ToString()?.Trim();
-                        // Якщо є тег (колонка C), беремо його, якщо ні - пустий рядок
                         var tag = row.Count > 2 ? row[2].ToString()?.Trim() : "";
                         
                         if (!string.IsNullOrEmpty(nick))
                         {
-                            // Зберігаємо всіх, хто є у вкладці "Команда"
-                            // Якщо тегу немає або стоїть прочерк, використовуємо нік замість тегу
                             if (string.IsNullOrEmpty(tag) || tag == "-")
                                 userTags[nick] = nick;
                             else
@@ -86,14 +86,16 @@ public class GoogleSheetsService : IGoogleSheetsService
                     if (row.Count > 5) 
                     {
                         var status = row[5].ToString()?.Trim().ToLower(); 
-                        var participant = row[3].ToString()?.Trim(); 
+                        var participant = row[3].ToString()?.Trim();      
                         
-                        // ГОЛОВНЕ ПРАВИЛО ФІЛЬТРАЦІЇ: userTags.ContainsKey(participant)
-                        // Бот перевіряє, чи є цей учасник у нашому списку Команди. Якщо ні - ігнорує.
-                        if (!string.IsNullOrEmpty(participant) && userTags.ContainsKey(participant) && (status == "виконується" || status == "правки"))
+                        bool isActiveStatus = status == "виконується" || status == "правки" || status == "true";
+
+                        if (!string.IsNullOrEmpty(participant) && isActiveStatus)
                         {
-                            var taskName = row.Count > 1 ? row[1].ToString() : "Завдання";
-                            var episode = row.Count > 0 ? row[0].ToString() : "";
+                            var taskName = row.Count > 1 ? row[1].ToString()?.Trim() : "Завдання"; 
+                            var episode = row.Count > 0 ? row[0].ToString()?.Trim() : "";          
+
+                            if (taskName?.ToUpper() == "TRUE") taskName = "Виконати завдання";
 
                             string safeTaskName = taskName.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
                             string statusIcon = status == "правки" ? "✏️" : "🔨";
@@ -123,8 +125,7 @@ public class GoogleSheetsService : IGoogleSheetsService
 
             string safeNick = rawNick.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
             
-            // Оскільки ми вже відфільтрували чужинців, ми точно знаємо, що цей нік є в userTags
-            string tag = userTags[rawNick];
+            string tag = userTags.ContainsKey(rawNick) ? userTags[rawNick] : rawNick;
             string safeTag = tag.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
             var userMsgList = new List<string>();
@@ -152,4 +153,218 @@ public class GoogleSheetsService : IGoogleSheetsService
 
         return resultMessages;
     }
+
+    public async Task AddLogEntryAsync(string userName, string action)
+    {
+        string basePath = AppDomain.CurrentDomain.BaseDirectory;
+        string fullPath = Path.Combine(basePath, Config.CredentialsFile);
+
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException($"Файл {fullPath} не знайдено!");
+
+        GoogleCredential credential;
+        using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
+        {
+            credential = GoogleCredential.FromStream(stream).CreateScoped(SheetsService.Scope.Spreadsheets);
+        }
+
+        var service = new SheetsService(new BaseClientService.Initializer
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = "Crystal Manager"
+        });
+
+        var values = new List<object> { DateTime.Now.ToString("dd.MM.yyyy HH:mm"), userName, action };
+        var valueRange = new ValueRange { Values = new List<IList<object>> { values } };
+
+        string range = "'Логи'!A:C"; 
+        var appendRequest = service.Spreadsheets.Values.Append(valueRange, Config.SheetId, range);
+        appendRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.USERENTERED;
+
+        await appendRequest.ExecuteAsync();
+    }
+
+    // ТУТ МЕТОД ДЛЯ ЗАПИСУ КАСТУ
+public async Task AddCastListAsync(string sheetName, string episode, List<(string Character, string Actor)> cast, string deadline)
+    {
+        string credentialsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Config.CredentialsFile);
+        GoogleCredential credential;
+        using (var stream = new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
+        {
+            credential = GoogleCredential.FromStream(stream).CreateScoped(SheetsService.Scope.Spreadsheets);
+        }
+
+        var service = new SheetsService(new BaseClientService.Initializer
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = "Crystal Manager"
+        });
+
+        // 1. Отримуємо список команди, щоб створити "перекладач" з тегів на псевдоніми
+        var tagToNick = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try 
+        {
+            var teamData = await service.Spreadsheets.Values.Get(Config.SheetId, "'Команда'!A2:C").ExecuteAsync();
+            if (teamData.Values != null)
+            {
+                foreach (var r in teamData.Values)
+                {
+                    if (r.Count > 0 && r[0] != null)
+                    {
+                        var nick = r[0].ToString().Trim();
+                        var tag = r.Count > 2 && r[2] != null ? r[2].ToString().Trim() : "";
+                        
+                        // Відкидаємо @ для зручності пошуку
+                        if (tag.StartsWith("@")) tag = tag.Substring(1);
+
+                        // Якщо є і нік, і тег - зберігаємо у словник
+                        if (!string.IsNullOrEmpty(nick) && !string.IsNullOrEmpty(tag) && tag != "-")
+                        {
+                            tagToNick[tag] = nick; // Наприклад: tagToNick["krunuca"] = "Щирий"
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // 2. Формуємо рядки для запису
+        var rows = new List<IList<object>>();
+
+        // Рядок-розділювач (серія по центру)
+        rows.Add(new List<object> { "", "", "", episode, "", "", "" });
+
+        foreach (var member in cast)
+        {
+            // Очищаємо тег актора від @, якщо він там випадково є
+            string cleanTag = member.Actor.Trim();
+            if (cleanTag.StartsWith("@")) cleanTag = cleanTag.Substring(1);
+
+            // МАГІЯ ТУТ: Шукаємо тег у словнику. Якщо знайшли - беремо Псевдонім. Якщо ні - залишаємо тег як є.
+            string finalActor = tagToNick.ContainsKey(cleanTag) ? tagToNick[cleanTag] : member.Actor;
+
+            rows.Add(new List<object> 
+            { 
+                episode,             
+                "Дабер",             
+                member.Character,    
+                finalActor,          // Записуємо Псевдонім (наприклад, "Щирий")
+                deadline,            
+                "Виконується",       
+                ""                   
+            });
+        }
+
+        var valueRange = new ValueRange { Values = rows };
+        var appendRequest = service.Spreadsheets.Values.Append(valueRange, Config.SheetId, $"'{sheetName}'!A:G");
+        appendRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.USERENTERED;
+
+        await appendRequest.ExecuteAsync();
+    }
+public async Task UpdateCorrectionsAsync(string sheetName, string episode, Dictionary<string, List<string>> corrections)
+{
+    string credentialsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Config.CredentialsFile);
+    GoogleCredential credential;
+    using (var stream = new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
+    {
+        credential = GoogleCredential.FromStream(stream).CreateScoped(SheetsService.Scope.Spreadsheets);
+    }
+
+    var service = new SheetsService(new BaseClientService.Initializer
+    {
+        HttpClientInitializer = credential,
+        ApplicationName = "Crystal Manager"
+    });
+
+    // 1. Створюємо "перекладач" з тегів на псевдоніми (так само, як для касту)
+    var tagToNick = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    try 
+    {
+        var teamData = await service.Spreadsheets.Values.Get(Config.SheetId, "'Команда'!A2:C").ExecuteAsync();
+        if (teamData.Values != null)
+        {
+            foreach (var r in teamData.Values)
+            {
+                if (r.Count > 0 && r[0] != null)
+                {
+                    var nick = r[0].ToString().Trim();
+                    var tag = r.Count > 2 && r[2] != null ? r[2].ToString().Trim() : "";
+                    if (tag.StartsWith("@")) tag = tag.Substring(1);
+
+                    if (!string.IsNullOrEmpty(nick) && !string.IsNullOrEmpty(tag) && tag != "-")
+                        tagToNick[tag] = nick; 
+                }
+            }
+        }
+    }
+    catch { }
+
+    // Переводимо передані теги у Псевдоніми, об'єднуючи таймкоди в один текст
+    var correctionsByNick = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var kvp in corrections)
+    {
+        string tag = kvp.Key.Replace("@", "").Trim();
+        string nick = tagToNick.ContainsKey(tag) ? tagToNick[tag] : tag; // Якщо не знайшли, лишаємо як є
+        correctionsByNick[nick] = string.Join("\n", kvp.Value);
+    }
+
+    // 2. Читаємо аркуш, щоб знайти номери рядків потрібних акторів
+    var readRequest = service.Spreadsheets.Values.Get(Config.SheetId, $"'{sheetName}'!A:G");
+    var response = await readRequest.ExecuteAsync();
+    var rows = response.Values;
+
+    if (rows == null || rows.Count == 0) throw new Exception("Аркуш порожній або не існує.");
+
+    var dataToUpdate = new List<ValueRange>();
+
+    for (int i = 0; i < rows.Count; i++)
+    {
+        var row = rows[i];
+        if (row.Count < 4) continue; // Пропускаємо пусті рядки
+
+        var rowEp = row[0]?.ToString()?.Trim();
+        var rowActorNick = row[3]?.ToString()?.Trim();
+
+        // Якщо це потрібна серія і актор є у списку правок
+        if (rowEp == episode && !string.IsNullOrEmpty(rowActorNick) && correctionsByNick.ContainsKey(rowActorNick))
+        {
+            int sheetRowIndex = i + 1; // Google Таблиці починаються з 1
+
+            string currentNotes = row.Count > 6 ? row[6]?.ToString()?.Trim() : "";
+            string newNotes = correctionsByNick[rowActorNick];
+
+            // Якщо примітки вже були, додаємо нові з нового рядка
+            if (!string.IsNullOrEmpty(currentNotes))
+            {
+                newNotes = currentNotes + "\n---\n" + newNotes;
+            }
+
+            // Готуємо оновлення для колонок F (Статус) та G (Примітки)
+            var valueRange = new ValueRange
+            {
+                Range = $"'{sheetName}'!F{sheetRowIndex}:G{sheetRowIndex}",
+                Values = new List<IList<object>> { new List<object> { "Правки", newNotes } }
+            };
+            dataToUpdate.Add(valueRange);
+        }
+    }
+
+
+// 3. Відправляємо пакетне оновлення
+    if (dataToUpdate.Count > 0)
+    {
+        var batchUpdateRequest = new BatchUpdateValuesRequest
+        {
+            ValueInputOption = "USER_ENTERED", // ТЕПЕР ПРАВИЛЬНО
+            Data = dataToUpdate
+        };
+
+        var request = service.Spreadsheets.Values.BatchUpdate(batchUpdateRequest, Config.SheetId);
+        await request.ExecuteAsync();
+    }
+    else
+    {
+        throw new Exception($"Не знайдено акторів з такими тегами у серії {episode}.");
+    }
+}
 }

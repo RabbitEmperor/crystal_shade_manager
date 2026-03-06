@@ -6,4 +6,9 @@ namespace crystal_shade_manager.Services;
 public interface IGoogleSheetsService
 {
     Task<Dictionary<string, List<string>>> GetUserTaskMessagesAsync();
+    // Новий метод для запису
+    Task AddLogEntryAsync(string userName, string action);
+    // НОВИЙ МЕТОД:
+    Task AddCastListAsync(string sheetName, string episode, List<(string Character, string Actor)> cast, string deadline);
+    Task UpdateCorrectionsAsync(string sheetName, string episode, Dictionary<string, List<string>> corrections);
 }
