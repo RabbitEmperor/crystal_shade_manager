@@ -20,11 +20,18 @@ public class CallbackQueryHandler
 
     public async Task HandleAsync(ITelegramBotClient bot, CallbackQuery cq, CancellationToken token)
     {
-        var msgId = cq.Message!.MessageId;
+        // ЩИТ №1: Якщо Телеграм надіслав "биті" дані без повідомлення або без тексту кнопки — просто ігноруємо.
+        // Це миттєво лагодить тест "HandleAsync_WhenDataIsNull_ShouldNotCrash"
+        if (cq.Message == null || string.IsNullOrEmpty(cq.Data))
+        {
+            return;
+        }
+
+        var msgId = cq.Message.MessageId;
         var chatId = cq.Message.Chat.Id;
         var threadId = cq.Message.MessageThreadId;
 
-        if (cq.Data!.StartsWith("set_"))
+        if (cq.Data.StartsWith("set_"))
         {
             var settings = _state.GetSettings(chatId);
             if (cq.Data == "set_toggle_select") settings.SelectAllByDefault = !settings.SelectAllByDefault;
@@ -39,13 +46,21 @@ public class CallbackQueryHandler
         try { await bot.AnswerCallbackQueryAsync(cq.Id, cancellationToken: token); } catch { }
 
         string sessionKey = $"{chatId}_{msgId}";
-        if (!_state.ActiveSessions.TryGetValue(sessionKey, out var session)) return;
+        
+        // ЩИТ №2: Перевіряємо, чи взагалі існує сховище сесій (_state.ActiveSessions != null), 
+        // перш ніж намагатися щось з нього дістати. Це лагодить тест "HandleAsync_WhenDataIsUnknown_ShouldIgnore"
+        if (_state.ActiveSessions == null || !_state.ActiveSessions.TryGetValue(sessionKey, out var session)) 
+        {
+            return;
+        }
 
         if (cq.Data.StartsWith("t_"))
         {
-            int index = int.Parse(cq.Data.Substring(2));
-            session.Toggles[index] = !session.Toggles[index]; 
-            try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.Build(session), cancellationToken: token); } catch { }
+            if (int.TryParse(cq.Data.Substring(2), out int index) && session.Toggles.ContainsKey(index))
+            {
+                session.Toggles[index] = !session.Toggles[index]; 
+                try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.Build(session), cancellationToken: token); } catch { }
+            }
         }
         else if (cq.Data == "send")
         {
@@ -58,7 +73,8 @@ public class CallbackQueryHandler
             {
                 foreach (var kvp in session.Toggles)
                 {
-                    if (!kvp.Value) continue;
+                    if (!kvp.Value || !session.Messages.ContainsKey(kvp.Key)) continue;
+                    
                     foreach (var msgText in session.Messages[kvp.Key])
                     {
                         try 
@@ -66,11 +82,11 @@ public class CallbackQueryHandler
                             await bot.SendTextMessageAsync(chatId, msgText, messageThreadId: threadId, parseMode: ParseMode.Html, cancellationToken: token);
                             await Task.Delay(delayTime, token); 
                         }
-                        catch { await Task.Delay(3000, token); } // Спрощена логіка ретраїв
+                        catch { await Task.Delay(3000, token); } 
                     }
                 }
-                await bot.SendTextMessageAsync(chatId, "🏁 Розсилка завершена", messageThreadId: threadId, cancellationToken: token);
-            }, token);
+                try { await bot.SendTextMessageAsync(chatId, "🏁 Розсилка завершена", messageThreadId: threadId, cancellationToken: token); } catch { }
+            }, CancellationToken.None);
         }
     }
 }

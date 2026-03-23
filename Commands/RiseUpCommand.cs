@@ -14,6 +14,7 @@ public class RiseUpCommand : ITelegramCommand
     private readonly IStateManager _state;
     public string Trigger => "/rise_up";
 
+    
     public RiseUpCommand(IStateManager state)
     {
         _state = state;
@@ -21,7 +22,19 @@ public class RiseUpCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient botClient, Message message, CancellationToken token)
     {
+        // === ЩИТ №1: Від битих повідомлень ===
+        if (message.Chat == null) return;
+
         var chatId = message.Chat.Id;
+        
+        // === ЩИТ №2: Від порожнього (null) кешу ===
+        var cache = _state.CachedUserMessages;
+        if (cache == null || cache.Count == 0)
+        {
+            await botClient.SendTextMessageAsync(chatId, "❌ Немає завдань для розсилки. Оновіть таблицю командою /refresh", cancellationToken: token);
+            return;
+        }
+        
         var threadId = message.MessageThreadId;
 
         if (_state.CachedUserMessages.Count == 0)
@@ -33,6 +46,12 @@ public class RiseUpCommand : ITelegramCommand
         var settings = _state.GetSettings(chatId);
         var session = new RiseUpSession();
         int index = 0;
+        
+        if (cache == null || cache.Count == 0) 
+        {
+            // Вивести повідомлення "Кеш порожній"
+            return;
+        }
         
         foreach (var kvp in _state.CachedUserMessages)
         {

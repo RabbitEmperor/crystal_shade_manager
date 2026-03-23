@@ -57,6 +57,9 @@ public class RefreshCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient bot, Message msg, CancellationToken token)
     {
+        if (msg.Chat == null) return;
+        var chatId = msg.Chat.Id;
+        
         var waitMsg = await bot.SendTextMessageAsync(msg.Chat.Id, "🔄 Оновлюю БД...", messageThreadId: msg.MessageThreadId, cancellationToken: token);
         try 
         {
