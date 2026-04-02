@@ -22,12 +22,10 @@ public class RiseUpCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient botClient, Message message, CancellationToken token)
     {
-        // === ЩИТ №1: Від битих повідомлень ===
         if (message.Chat == null) return;
 
         var chatId = message.Chat.Id;
         
-        // === ЩИТ №2: Від порожнього (null) кешу ===
         var cache = _state.CachedUserMessages;
         if (cache == null || cache.Count == 0)
         {
@@ -49,7 +47,6 @@ public class RiseUpCommand : ITelegramCommand
         
         if (cache == null || cache.Count == 0) 
         {
-            // Вивести повідомлення "Кеш порожній"
             return;
         }
         

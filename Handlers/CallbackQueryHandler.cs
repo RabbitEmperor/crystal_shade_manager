@@ -20,8 +20,7 @@ public class CallbackQueryHandler
 
     public async Task HandleAsync(ITelegramBotClient bot, CallbackQuery cq, CancellationToken token)
     {
-        // ЩИТ №1: Якщо Телеграм надіслав "биті" дані без повідомлення або без тексту кнопки — просто ігноруємо.
-        // Це миттєво лагодить тест "HandleAsync_WhenDataIsNull_ShouldNotCrash"
+
         if (cq.Message == null || string.IsNullOrEmpty(cq.Data))
         {
             return;
@@ -46,9 +45,7 @@ public class CallbackQueryHandler
         try { await bot.AnswerCallbackQueryAsync(cq.Id, cancellationToken: token); } catch { }
 
         string sessionKey = $"{chatId}_{msgId}";
-        
-        // ЩИТ №2: Перевіряємо, чи взагалі існує сховище сесій (_state.ActiveSessions != null), 
-        // перш ніж намагатися щось з нього дістати. Це лагодить тест "HandleAsync_WhenDataIsUnknown_ShouldIgnore"
+
         if (_state.ActiveSessions == null || !_state.ActiveSessions.TryGetValue(sessionKey, out var session)) 
         {
             return;

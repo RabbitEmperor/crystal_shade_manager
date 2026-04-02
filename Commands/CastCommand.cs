@@ -24,13 +24,10 @@ public class CastCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient botClient, Message message, CancellationToken token)
     {
-        // === ЩИТ ВІД КРАШУ ===
-        // Якщо тексту немає взагалі (системне повідомлення, пусте фото тощо) — просто ігноруємо
         if (string.IsNullOrEmpty(message.Text))
         {
             return;
         }
-        // =====================
         
         var chatId = message.Chat.Id;
         var threadId = message.MessageThreadId;
