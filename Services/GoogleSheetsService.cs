@@ -354,4 +354,96 @@ public class GoogleSheetsService : IGoogleSheetsService
         var request = _service.Spreadsheets.Values.BatchUpdate(batchUpdateRequest, Config.SheetId);
         await request.ExecuteAsync();
     }
-}
+   // ==========================================
+    // МЕТОД 1: Збір завдань по тайтлах (який зараз "загубився")
+    // ==========================================
+public async Task<List<crystal_shade_manager.Models.TitleTask>> GetTitlesTasksAsync()
+    {
+        var tasks = new List<crystal_shade_manager.Models.TitleTask>();
+        try
+        {
+            var request = _service.Spreadsheets.Values.Get(Config.SheetId, "'Тайтли'!A2:C");
+            var response = await request.ExecuteAsync();
+            var values = response.Values;
+
+            if (values == null || values.Count == 0) return tasks;
+
+            foreach (var row in values)
+            {
+                if (row.Count < 3) continue;
+                var titleName = row[0]?.ToString()?.Trim();
+                var detailsText = row[2]?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(titleName) || string.IsNullOrEmpty(detailsText)) continue;
+
+                var lines = detailsText.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+                string currentEpisode = "Невідомий епізод";
+
+                foreach (var line in lines)
+                {
+                    var cleanLine = line.Trim();
+                    if (string.IsNullOrEmpty(cleanLine)) continue;
+                    if (cleanLine.EndsWith("епізод:"))
+                    {
+                        currentEpisode = cleanLine.Replace(":", "").Trim();
+                        continue;
+                    }
+
+                    var match = System.Text.RegularExpressions.Regex.Match(cleanLine, @"^(.+?)\s+<(.+?)>$");
+                    if (match.Success)
+                    {
+                        tasks.Add(new crystal_shade_manager.Models.TitleTask
+                        {
+                            TitleName = titleName,
+                            Episode = currentEpisode,
+                            Username = match.Groups[1].Value.Trim(),
+                            Role = match.Groups[2].Value.Trim()
+                        });
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex) { System.Console.WriteLine($"Помилка 'Тайтли': {ex.Message}"); }
+        return tasks;
+    }
+
+    public async Task<Dictionary<string, string>> GetTeamTagsAsync()
+    {
+        var tagsDict = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var request = _service.Spreadsheets.Values.Get(Config.SheetId, "'Команда'!A2:C");
+            var response = await request.ExecuteAsync();
+            var values = response.Values;
+
+            if (values != null)
+            {
+                foreach (var row in values)
+                {
+                    if (row.Count >= 3)
+                    {
+                        var pseudonym = row[0]?.ToString()?.Trim();
+                        var tgTag = row[2]?.ToString()?.Trim();
+
+                        if (!string.IsNullOrEmpty(pseudonym) && !string.IsNullOrEmpty(tgTag))
+                        {
+                            if (tgTag == "-")
+                            {
+                                tagsDict[pseudonym] = "-";
+                                continue;
+                            }
+
+                            string properTag = tgTag.StartsWith("@") ? tgTag : "@" + tgTag;
+                            string tagWithoutAt = properTag.Substring(1);
+
+                            tagsDict[pseudonym] = properTag;
+                            tagsDict[tagWithoutAt] = properTag;
+                            tagsDict[properTag] = properTag;
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex) { System.Console.WriteLine($"Помилка 'Команда': {ex.Message}"); }
+        return tagsDict;
+    }
+} // <--- Це остання фігурна дужка всього класу GoogleSheetsService

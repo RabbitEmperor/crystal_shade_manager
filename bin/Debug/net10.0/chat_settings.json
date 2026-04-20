@@ -1,4 +1,8 @@
 {
+  "-1003774023433": {
+    "SelectAllByDefault": false,
+    "SafeModeDelay": true
+  },
   "-5238069191": {
     "SelectAllByDefault": true,
     "SafeModeDelay": false

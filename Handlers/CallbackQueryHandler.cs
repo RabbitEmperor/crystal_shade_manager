@@ -1,89 +1,104 @@
-using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Types;
-using Telegram.Bot.Types.Enums;
 using crystal_shade_manager.Interfaces;
-using crystal_shade_manager.Helpers;
+using crystal_shade_manager.Services;
 
 namespace crystal_shade_manager.Handlers;
 
 public class CallbackQueryHandler
 {
-    private readonly IStateManager _state;
+    private readonly IStateManager _stateManager;
+    private readonly IGoogleSheetsService _sheetsService; 
 
-    public CallbackQueryHandler(IStateManager state)
+    public CallbackQueryHandler(IStateManager stateManager, IGoogleSheetsService sheetsService = null)
     {
-        _state = state;
+        _stateManager = stateManager;
+        _sheetsService = sheetsService;
     }
 
-    public async Task HandleAsync(ITelegramBotClient bot, CallbackQuery cq, CancellationToken token)
+    public async Task HandleAsync(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
     {
+        if (callbackQuery?.Data == null) return;
 
-        if (cq.Message == null || string.IsNullOrEmpty(cq.Data))
+        if (callbackQuery.Data == "set_toggle_select")
         {
-            return;
-        }
-
-        var msgId = cq.Message.MessageId;
-        var chatId = cq.Message.Chat.Id;
-        var threadId = cq.Message.MessageThreadId;
-
-        if (cq.Data.StartsWith("set_"))
-        {
-            var settings = _state.GetSettings(chatId);
-            if (cq.Data == "set_toggle_select") settings.SelectAllByDefault = !settings.SelectAllByDefault;
-            else if (cq.Data == "set_toggle_speed") settings.SafeModeDelay = !settings.SafeModeDelay;
-            
-            _state.SaveSettings();
-            try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.BuildSettings(settings), cancellationToken: token); } catch { }
-            try { await bot.AnswerCallbackQueryAsync(cq.Id, "Збережено!", cancellationToken: token); } catch { }
-            return;
-        }
-
-        try { await bot.AnswerCallbackQueryAsync(cq.Id, cancellationToken: token); } catch { }
-
-        string sessionKey = $"{chatId}_{msgId}";
-
-        if (_state.ActiveSessions == null || !_state.ActiveSessions.TryGetValue(sessionKey, out var session)) 
-        {
-            return;
-        }
-
-        if (cq.Data.StartsWith("t_"))
-        {
-            if (int.TryParse(cq.Data.Substring(2), out int index) && session.Toggles.ContainsKey(index))
+            var settings = _stateManager.GetSettings(callbackQuery.Message.Chat.Id);
+            if (settings != null)
             {
-                session.Toggles[index] = !session.Toggles[index]; 
-                try { await bot.EditMessageReplyMarkupAsync(chatId, msgId, replyMarkup: KeyboardBuilder.Build(session), cancellationToken: token); } catch { }
+                settings.SelectAllByDefault = !settings.SelectAllByDefault;
+                _stateManager.SaveSettings();
             }
+            return;
         }
-        else if (cq.Data == "send")
+
+        if (callbackQuery.Data.StartsWith("tru|") || callbackQuery.Data == "tru_all")
         {
-            await bot.EditMessageTextAsync(chatId, msgId, "🚀 Розсилаю...", cancellationToken: token);
-            _state.ActiveSessions.TryRemove(sessionKey, out _);
+            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Формую звіт...", cancellationToken: ct);
+            await botClient.EditMessageTextAsync(callbackQuery.Message.Chat.Id, callbackQuery.Message.MessageId, "⏳ Збираю дані з таблиці...", cancellationToken: ct);
 
-            int delayTime = _state.GetSettings(chatId).SafeModeDelay ? 3100 : 1500;
+            string targetTitle = callbackQuery.Data == "tru_all" ? "ALL" : callbackQuery.Data.Split('|')[1];
 
-            _ = Task.Run(async () => 
+            var allTasks = await _sheetsService.GetTitlesTasksAsync();
+            var teamTags = await _sheetsService.GetTeamTagsAsync();
+
+            var filteredTasks = targetTitle == "ALL" 
+                ? allTasks 
+                : allTasks.Where(t => t.TitleName.StartsWith(targetTitle)).ToList();
+
+            var groupedTitles = filteredTasks.GroupBy(t => t.TitleName).OrderBy(g => g.Key);
+            bool isFirstMessage = true;
+
+            foreach (var titleGroup in groupedTitles)
             {
-                foreach (var kvp in session.Toggles)
+                var sb = new System.Text.StringBuilder();
+                
+                // Рятуємося від помилки Ambiguous invocation
+                string titleHeader = $"🎬 **{titleGroup.Key}**\n";
+                sb.AppendLine(titleHeader);
+
+                var groupedEpisodes = titleGroup.GroupBy(t => t.Episode).OrderBy(g => g.Key);
+
+                foreach (var epGroup in groupedEpisodes)
                 {
-                    if (!kvp.Value || !session.Messages.ContainsKey(kvp.Key)) continue;
+                    string epHeader = $"📺 {epGroup.Key}:";
+                    sb.AppendLine(epHeader);
                     
-                    foreach (var msgText in session.Messages[kvp.Key])
+                    foreach (var task in epGroup)
                     {
-                        try 
+                        string userPing;
+                        string rawName = task.Username.Trim();
+
+                        if (teamTags.TryGetValue(rawName, out string actualTgTag) && actualTgTag != "-")
                         {
-                            await bot.SendTextMessageAsync(chatId, msgText, messageThreadId: threadId, parseMode: ParseMode.Html, cancellationToken: token);
-                            await Task.Delay(delayTime, token); 
+                            userPing = actualTgTag;
                         }
-                        catch { await Task.Delay(3000, token); } 
+                        else
+                        {
+                            userPing = rawName.StartsWith("@") ? rawName : "@" + rawName;
+                            if (teamTags.ContainsKey(rawName) && teamTags[rawName] == "-") 
+                                userPing = rawName;
+                        }
+                        
+                        // Рятуємося від помилки Ambiguous invocation
+                        string taskLine = $" ├ 👤 {userPing} — <i>{task.Role}</i>";
+                        sb.AppendLine(taskLine);
                     }
+                    sb.AppendLine();
                 }
-                try { await bot.SendTextMessageAsync(chatId, "🏁 Розсилка завершена", messageThreadId: threadId, cancellationToken: token); } catch { }
-            }, CancellationToken.None);
+
+                if (isFirstMessage)
+                {
+                    await botClient.EditMessageTextAsync(callbackQuery.Message.Chat.Id, callbackQuery.Message.MessageId, sb.ToString(), parseMode: Telegram.Bot.Types.Enums.ParseMode.Html, cancellationToken: ct);
+                    isFirstMessage = false;
+                }
+                else
+                {
+                    await botClient.SendTextMessageAsync(callbackQuery.Message.Chat.Id, sb.ToString(), parseMode: Telegram.Bot.Types.Enums.ParseMode.Html, cancellationToken: ct);
+                }
+            }
         }
     }
 }
