@@ -24,6 +24,11 @@ public class CastCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient botClient, Message message, CancellationToken token)
     {
+        if (string.IsNullOrEmpty(message.Text))
+        {
+            return;
+        }
+        
         var chatId = message.Chat.Id;
         var threadId = message.MessageThreadId;
         var text = message.Text;
