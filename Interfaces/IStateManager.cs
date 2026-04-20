@@ -10,4 +10,5 @@ public interface IStateManager
     ConcurrentDictionary<string, RiseUpSession> ActiveSessions { get; }
     BotSettings GetSettings(long chatId);
     void SaveSettings();
+    
 }
