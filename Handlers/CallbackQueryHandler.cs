@@ -8,6 +8,7 @@ using Telegram.Bot.Types.Enums;
 using crystal_shade_manager.Interfaces;
 using crystal_shade_manager.Services;
 using crystal_shade_manager.Helpers;
+using Telegram.Bot.Exceptions;
 
 namespace crystal_shade_manager.Handlers;
 
@@ -22,30 +23,52 @@ public class CallbackQueryHandler
         _sheetsService = sheetsService;
     }
 
+    // Допоміжний метод для безпечної відправки
+    private async Task SafeSendAsync(ITelegramBotClient botClient, long chatId, int? threadId, string text, CancellationToken ct)
+    {
+        try
+        {
+            await botClient.SendTextMessageAsync(
+                chatId: chatId,
+                messageThreadId: threadId,
+                text: text,
+                parseMode: ParseMode.Html,
+                cancellationToken: ct);
+        }
+        catch (ApiRequestException ex) when (ex.Message.Contains("TOPIC_CLOSED"))
+        {
+            // Якщо гілка закрита, надсилаємо в загальний чат (без threadId)
+            await botClient.SendTextMessageAsync(
+                chatId: chatId,
+                text: $"⚠️ (Помилка гілки) {text}",
+                parseMode: ParseMode.Html,
+                cancellationToken: ct);
+        }
+        catch { /* ігноруємо інші помилки */ }
+    }
+
     public async Task HandleAsync(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
     {
-        // ВАЖЛИВО: Отримуємо дані безпосередньо з повідомлення, де була натиснута кнопка
         if (callbackQuery?.Data == null || callbackQuery.Message == null) return;
 
         string data = callbackQuery.Data;
         long chatId = callbackQuery.Message.Chat.Id;
         int messageId = callbackQuery.Message.MessageId;
-        int? threadId = callbackQuery.Message.MessageThreadId; 
+        int? threadId = callbackQuery.Message.MessageThreadId;
         string sessionKey = $"{chatId}_{messageId}";
 
-        // 1. СЕСІЇ RISE UP (Класична розсилка)
+        // 1. СЕСІЇ RISE UP
         if (_state.ActiveSessions.TryGetValue(sessionKey, out var session))
         {
             if (data == "send")
             {
-                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "🚀 Розсилку розпочато!", cancellationToken: ct);
+                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "🚀 Розпочато!", cancellationToken: ct);
 
-                // Оновлюємо статус (додано threadId для надійності в топіках)
                 await botClient.EditMessageTextAsync(
-                    chatId: chatId, 
-                    messageId: messageId, 
-                    text: "⏳ <b>Йде відправка списків...</b>", 
-                    parseMode: ParseMode.Html, 
+                    chatId: chatId,
+                    messageId: messageId,
+                    text: "⏳ <b>Йде відправка списків...</b>",
+                    parseMode: ParseMode.Html,
                     cancellationToken: ct);
 
                 for (int i = 0; i < session.Users.Count; i++)
@@ -56,31 +79,14 @@ public class CallbackQueryHandler
                         {
                             foreach (var msg in userMsgs)
                             {
-                                try 
-                                { 
-                                    // Відправляємо саме в цей чат і саме в цю гілку
-                                    await botClient.SendTextMessageAsync(
-                                        chatId: chatId, 
-                                        text: msg, 
-                                        messageThreadId: threadId, 
-                                        parseMode: ParseMode.Html, 
-                                        cancellationToken: ct); 
-                                }
-                                catch { }
+                                await SafeSendAsync(botClient, chatId, threadId, msg, ct);
                             }
                         }
                     }
                 }
 
                 _state.ActiveSessions.TryRemove(sessionKey, out _);
-                
-                // Фінальне повідомлення в ту саму гілку
-                await botClient.SendTextMessageAsync(
-                    chatId: chatId, 
-                    text: "✅ <b>Розсилку завершено!</b>", 
-                    messageThreadId: threadId, 
-                    parseMode: ParseMode.Html, 
-                    cancellationToken: ct);
+                await SafeSendAsync(botClient, chatId, threadId, "✅ <b>Розсилку завершено!</b>", ct);
                 return;
             }
 
@@ -92,9 +98,9 @@ public class CallbackQueryHandler
                     {
                         session.Toggles[idx] = !session.Toggles[idx];
                         await botClient.EditMessageReplyMarkupAsync(
-                            chatId: chatId, 
-                            messageId: messageId, 
-                            replyMarkup: KeyboardBuilder.Build(session), 
+                            chatId: chatId,
+                            messageId: messageId,
+                            replyMarkup: KeyboardBuilder.Build(session),
                             cancellationToken: ct);
                     }
                 }
@@ -116,13 +122,10 @@ public class CallbackQueryHandler
             return;
         }
 
-        // 3. TITLES RISE UP (Розсилка по тайтлах)
+        // 3. TITLES RISE UP
         if (data.StartsWith("tru|") || data == "tru_all")
         {
-            if (_sheetsService != null)
-            {
-                await ProcessTitlesRiseUp(botClient, callbackQuery, ct);
-            }
+            if (_sheetsService != null) await ProcessTitlesRiseUp(botClient, callbackQuery, ct);
         }
     }
 
@@ -132,13 +135,13 @@ public class CallbackQueryHandler
         long chatId = callbackQuery.Message.Chat.Id;
         int? threadId = callbackQuery.Message.MessageThreadId;
 
-        await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Формую звіт...", cancellationToken: ct);
+        await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Формую...", cancellationToken: ct);
         
         await botClient.EditMessageTextAsync(
-            chatId: chatId, 
-            messageId: callbackQuery.Message.MessageId, 
-            text: "⏳ <b>Обробка запиту по тайтлах...</b>", 
-            parseMode: ParseMode.Html, 
+            chatId: chatId,
+            messageId: callbackQuery.Message.MessageId,
+            text: "⏳ <b>Обробка запиту...</b>",
+            parseMode: ParseMode.Html,
             cancellationToken: ct);
 
         string targetTitle = data == "tru_all" ? "ALL" : data.Split('|')[1];
@@ -170,19 +173,9 @@ public class CallbackQueryHandler
                 sb.AppendLine();
             }
 
-            await botClient.SendTextMessageAsync(
-                chatId: chatId,
-                messageThreadId: threadId, 
-                text: sb.ToString(),
-                parseMode: ParseMode.Html,
-                cancellationToken: ct);
+            await SafeSendAsync(botClient, chatId, threadId, sb.ToString(), ct);
         }
 
-        await botClient.SendTextMessageAsync(
-            chatId: chatId,
-            messageThreadId: threadId,
-            text: "✅ <b>Розсилку по тайтлах завершено!</b>",
-            parseMode: ParseMode.Html,
-            cancellationToken: ct);
+        await SafeSendAsync(botClient, chatId, threadId, "✅ <b>Розсилку по тайтлах завершено!</b>", ct);
     }
 }
