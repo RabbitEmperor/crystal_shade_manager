@@ -24,22 +24,29 @@ public class CallbackQueryHandler
 
     public async Task HandleAsync(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
     {
+        // ВАЖЛИВО: Отримуємо дані безпосередньо з повідомлення, де була натиснута кнопка
         if (callbackQuery?.Data == null || callbackQuery.Message == null) return;
 
         string data = callbackQuery.Data;
         long chatId = callbackQuery.Message.Chat.Id;
         int messageId = callbackQuery.Message.MessageId;
+        int? threadId = callbackQuery.Message.MessageThreadId; 
         string sessionKey = $"{chatId}_{messageId}";
 
-        // 1. ОБРОБКА СЕСІЇ RISE UP (Класична розсилка)
+        // 1. СЕСІЇ RISE UP (Класична розсилка)
         if (_state.ActiveSessions.TryGetValue(sessionKey, out var session))
         {
             if (data == "send")
             {
                 await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "🚀 Розсилку розпочато!", cancellationToken: ct);
 
-                // Редагуємо повідомлення з кнопками, щоб воно просто висіло як статус
-                await botClient.EditMessageTextAsync(chatId, messageId, "⏳ <b>Йде відправка списків...</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+                // Оновлюємо статус (додано threadId для надійності в топіках)
+                await botClient.EditMessageTextAsync(
+                    chatId: chatId, 
+                    messageId: messageId, 
+                    text: "⏳ <b>Йде відправка списків...</b>", 
+                    parseMode: ParseMode.Html, 
+                    cancellationToken: ct);
 
                 for (int i = 0; i < session.Users.Count; i++)
                 {
@@ -51,8 +58,13 @@ public class CallbackQueryHandler
                             {
                                 try 
                                 { 
-                                    // Відправляємо кожній людині список ОКРЕМИМ повідомленням
-                                    await botClient.SendTextMessageAsync(chatId, msg, parseMode: ParseMode.Html, cancellationToken: ct); 
+                                    // Відправляємо саме в цей чат і саме в цю гілку
+                                    await botClient.SendTextMessageAsync(
+                                        chatId: chatId, 
+                                        text: msg, 
+                                        messageThreadId: threadId, 
+                                        parseMode: ParseMode.Html, 
+                                        cancellationToken: ct); 
                                 }
                                 catch { }
                             }
@@ -62,8 +74,13 @@ public class CallbackQueryHandler
 
                 _state.ActiveSessions.TryRemove(sessionKey, out _);
                 
-                // ВІДПРАВЛЯЄМО ПОВІДОМЛЕННЯ ПРО ЗАВЕРШЕННЯ В КІНЕЦЬ ЧАТУ
-                await botClient.SendTextMessageAsync(chatId, "✅ <b>Розсилку завершено!</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+                // Фінальне повідомлення в ту саму гілку
+                await botClient.SendTextMessageAsync(
+                    chatId: chatId, 
+                    text: "✅ <b>Розсилку завершено!</b>", 
+                    messageThreadId: threadId, 
+                    parseMode: ParseMode.Html, 
+                    cancellationToken: ct);
                 return;
             }
 
@@ -74,7 +91,11 @@ public class CallbackQueryHandler
                     if (session.Toggles.ContainsKey(idx))
                     {
                         session.Toggles[idx] = !session.Toggles[idx];
-                        await botClient.EditMessageReplyMarkupAsync(chatId, messageId, replyMarkup: KeyboardBuilder.Build(session), cancellationToken: ct);
+                        await botClient.EditMessageReplyMarkupAsync(
+                            chatId: chatId, 
+                            messageId: messageId, 
+                            replyMarkup: KeyboardBuilder.Build(session), 
+                            cancellationToken: ct);
                     }
                 }
                 await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
@@ -105,80 +126,63 @@ public class CallbackQueryHandler
         }
     }
 
-private async Task ProcessTitlesRiseUp(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
-{
-    string data = callbackQuery.Data;
-    long chatId = callbackQuery.Message.Chat.Id;
-
-    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Формую звіт...", cancellationToken: ct);
-    
-    await botClient.EditMessageTextAsync(
-        chatId: chatId, 
-        messageId: callbackQuery.Message.MessageId, 
-        text: "⏳ <b>Обробка запиту по тайтлах...</b>", 
-        parseMode: ParseMode.Html, 
-        cancellationToken: ct);
-
-    string targetTitle = data == "tru_all" ? "ALL" : data.Split('|')[1];
-    var allTasks = await _sheetsService.GetTitlesTasksAsync();
-    
-    // Отримуємо словник тегів (він уже має бути Case-Insensitive завдяки нашому GetTeamTagsAsync)
-    var teamTags = await _sheetsService.GetTeamTagsAsync();
-
-    var filteredTasks = targetTitle == "ALL" 
-        ? allTasks 
-        : allTasks.Where(t => t.TitleName.Contains(targetTitle)).ToList();
-
-    var groupedTitles = filteredTasks.GroupBy(t => t.TitleName).OrderBy(g => g.Key);
-
-    foreach (var titleGroup in groupedTitles)
+    private async Task ProcessTitlesRiseUp(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"🎬 <b>{titleGroup.Key}</b>\n");
+        string data = callbackQuery.Data;
+        long chatId = callbackQuery.Message.Chat.Id;
+        int? threadId = callbackQuery.Message.MessageThreadId;
 
-        foreach (var epGroup in titleGroup.GroupBy(t => t.Episode).OrderBy(g => g.Key))
+        await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Формую звіт...", cancellationToken: ct);
+        
+        await botClient.EditMessageTextAsync(
+            chatId: chatId, 
+            messageId: callbackQuery.Message.MessageId, 
+            text: "⏳ <b>Обробка запиту по тайтлах...</b>", 
+            parseMode: ParseMode.Html, 
+            cancellationToken: ct);
+
+        string targetTitle = data == "tru_all" ? "ALL" : data.Split('|')[1];
+        var allTasks = await _sheetsService.GetTitlesTasksAsync();
+        var teamTags = await _sheetsService.GetTeamTagsAsync();
+
+        var filteredTasks = targetTitle == "ALL" 
+            ? allTasks 
+            : allTasks.Where(t => t.TitleName.Contains(targetTitle)).ToList();
+
+        var groupedTitles = filteredTasks.GroupBy(t => t.TitleName).OrderBy(g => g.Key);
+
+        foreach (var titleGroup in groupedTitles)
         {
-            sb.AppendLine($"📺 {epGroup.Key}:");
-            foreach (var task in epGroup)
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"🎬 <b>{titleGroup.Key}</b>\n");
+
+            foreach (var epGroup in titleGroup.GroupBy(t => t.Episode).OrderBy(g => g.Key))
             {
-                string rawName = task.Username.Trim();
-                string userPing;
-
-                // 1. Спробуємо знайти в словнику (ігноруючи регістр)
-                if (teamTags.TryGetValue(rawName, out string tag) && tag != "-")
+                sb.AppendLine($"📺 {epGroup.Key}:");
+                foreach (var task in epGroup)
                 {
-                    userPing = tag;
-                }
-                else
-                {
-                    // 2. Якщо в словнику немає, але в "Команді" для цього юзера прочерк — лишаємо текст
-                    if (teamTags.ContainsKey(rawName) && teamTags[rawName] == "-")
-                    {
-                        userPing = rawName;
-                    }
-                    else
-                    {
-                        // 3. Якщо взагалі не знайшли — додаємо @ примусово, щоб спробувати тегнути
-                        userPing = rawName.StartsWith("@") ? rawName : "@" + rawName;
-                    }
-                }
+                    string rawName = task.Username.Trim();
+                    string userPing = (teamTags.TryGetValue(rawName, out string tag) && tag != "-") 
+                        ? tag : (rawName.StartsWith("@") ? rawName : "@" + rawName);
 
-                sb.AppendLine($" ├ 👤 {userPing} — <i>{task.Role}</i>");
+                    sb.AppendLine($" ├ 👤 {userPing} — <i>{task.Role}</i>");
+                }
+                sb.AppendLine();
             }
-            sb.AppendLine();
+
+            await botClient.SendTextMessageAsync(
+                chatId: chatId,
+                messageThreadId: threadId, 
+                text: sb.ToString(),
+                parseMode: ParseMode.Html,
+                cancellationToken: ct);
         }
 
         await botClient.SendTextMessageAsync(
             chatId: chatId,
-            text: sb.ToString(),
+            messageThreadId: threadId,
+            text: "✅ <b>Розсилку по тайтлах завершено!</b>",
             parseMode: ParseMode.Html,
             cancellationToken: ct);
     }
-
-    await botClient.SendTextMessageAsync(
-        chatId: chatId,
-        text: "✅ <b>Розсилку по тайтлах завершено!</b>",
-        parseMode: ParseMode.Html,
-        cancellationToken: ct);
-}
 }

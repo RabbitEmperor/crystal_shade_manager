@@ -23,16 +23,22 @@ public class TitlesRiseUpCommand : ITelegramCommand
 
     public async Task ExecuteAsync(ITelegramBotClient botClient, Message message, CancellationToken ct)
     {
+        // 1. Додаємо messageThreadId тут, щоб повідомлення "Отримую список..." не летіло в General
         var processingMessage = await botClient.SendTextMessageAsync(
-            message.Chat.Id, 
-            "🔄 Отримую список поточних тайтлів...", 
+            chatId: message.Chat.Id, 
+            text: "🔄 Отримую список поточних тайтлів...", 
+            messageThreadId: message.MessageThreadId, 
             cancellationToken: ct);
 
         var allTasks = await _sheetsService.GetTitlesTasksAsync();
 
         if (allTasks.Count == 0)
         {
-            await botClient.EditMessageTextAsync(message.Chat.Id, processingMessage.MessageId, "✅ Наразі немає активних завдань.", cancellationToken: ct);
+            await botClient.EditMessageTextAsync(
+                chatId: message.Chat.Id, 
+                messageId: processingMessage.MessageId, 
+                text: "✅ Наразі немає активних завдань.", 
+                cancellationToken: ct);
             return;
         }
 
@@ -49,10 +55,11 @@ public class TitlesRiseUpCommand : ITelegramCommand
 
         var keyboard = new InlineKeyboardMarkup(buttons);
 
+        // 2. EditMessageTextAsync не потребує threadId, бо він редагує вже існуюче повідомлення в потрібній гілці
         await botClient.EditMessageTextAsync(
-            message.Chat.Id,
-            processingMessage.MessageId,
-            "👇 Оберіть тайтл для формування Rise Up розсилки:",
+            chatId: message.Chat.Id,
+            messageId: processingMessage.MessageId,
+            text: "👇 Оберіть тайтл для формування Rise Up розсилки:",
             replyMarkup: keyboard,
             cancellationToken: ct);
     }
