@@ -35,16 +35,19 @@ public class CallbackQueryHandler
                 parseMode: ParseMode.Html,
                 cancellationToken: ct);
         }
-        catch (ApiRequestException ex) when (ex.Message.Contains("TOPIC_CLOSED"))
+        catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("TOPIC_CLOSED"))
         {
-            // Якщо гілка закрита, надсилаємо в загальний чат (без threadId)
+            // ПЛАН "Б": Якщо гілка закрита, шлемо в корінь чату (без threadId)
             await botClient.SendTextMessageAsync(
                 chatId: chatId,
-                text: $"⚠️ (Помилка гілки) {text}",
+                text: $"⚠️ (Гілка закрита) {text}",
                 parseMode: ParseMode.Html,
                 cancellationToken: ct);
         }
-        catch { /* ігноруємо інші помилки */ }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Error] Непередбачена помилка відправки: {ex.Message}");
+        }
     }
 
     public async Task HandleAsync(ITelegramBotClient botClient, CallbackQuery callbackQuery, CancellationToken ct)
