@@ -193,25 +193,36 @@ public class GoogleSheetsService : IGoogleSheetsService
         var tagToNick = await GetTeamDictionaryAsync(tagToNick: true);
         var rows = new List<IList<object>>();
 
+        // Додаємо заголовок (номер епізоду)
         rows.Add(new List<object> { episode });
+
+        // 1. Створюємо тимчасовий список, щоб зберегти очищені дані ПЕРЕД записом
+        var processedCast = new List<(string Character, string FinalActor)>();
 
         foreach (var member in cast)
         {
-            // 1. Жорстко відрізаємо все, що йде після пробілу або відкритої дужки.
-            // Тобто з "@oBogeMiy (1 репліка)" ми робимо просто "oBogeMiy"
+            // Очищаємо тег від " (1 репліка)" та іншого сміття
             string cleanTag = member.Actor.Split(new[] { ' ', '(', '\u00A0' }, StringSplitOptions.RemoveEmptyEntries)[0].Replace("@", "").Trim();
 
-            // 2. Шукаємо псевдонім у нашому словнику. 
-            // Якщо знайшли oBogeMiy -> беремо "Чагарник". Якщо не знайшли -> пишемо "@oBogeMiy"
+            // Шукаємо псевдонім (наприклад, "Чагарник")
             string finalActor = tagToNick.ContainsKey(cleanTag) ? tagToNick[cleanTag] : "@" + cleanTag;
 
-            // 3. Записуємо в таблицю
+            // Зберігаємо в тимчасовий список
+            processedCast.Add((member.Character, finalActor));
+        }
+
+        // 2. СОРТУЄМО список по псевдонімах акторів (однакові імена стануть поруч)
+        var sortedCast = processedCast.OrderBy(m => m.FinalActor).ToList();
+
+        // 3. Тепер записуємо вже ВІДСОРТОВАНИЙ список у рядки для таблиці
+        foreach (var member in sortedCast)
+        {
             rows.Add(new List<object> 
             { 
                 episode,             
                 "Дабер",             
                 member.Character,    
-                finalActor,          // Тут тепер буде красивий псевдонім!
+                member.FinalActor,   // Сюди потрапить уже красивий псевдонім  
                 deadline,            
                 "Виконується",       
                 ""                   
