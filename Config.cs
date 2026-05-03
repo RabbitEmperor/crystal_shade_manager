@@ -8,7 +8,7 @@ public static class Config
    
    //тестові дані
    //public const string BotToken = "8700490987:AAG0cWLrzybP_SoCdEUXUvseEIw9nZ709nI"; 
-   //public const string SheetId = "1VH2ph4U7PkkAI3bPXwev4yNqpvAoPCEnQozPpoWvpIU"; 
+    //public const string SheetId = "1VH2ph4U7PkkAI3bPXwev4yNqpvAoPCEnQozPpoWvpIU"; 
    
     public const string CredentialsFile = "credentials.json"; 
 }
