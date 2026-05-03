@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -23,7 +24,7 @@ public class CallbackQueryHandler
         _sheetsService = sheetsService;
     }
 
-    // Допоміжний метод для безпечної відправки
+    // Безпечний метод для відправки повідомлень (анти-краш для топіків)
     private async Task SafeSendAsync(ITelegramBotClient botClient, long chatId, int? threadId, string text, CancellationToken ct)
     {
         try
@@ -35,7 +36,7 @@ public class CallbackQueryHandler
                 parseMode: ParseMode.Html,
                 cancellationToken: ct);
         }
-        catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("TOPIC_CLOSED"))
+        catch (ApiRequestException ex) when (ex.Message.Contains("TOPIC_CLOSED"))
         {
             // ПЛАН "Б": Якщо гілка закрита, шлемо в корінь чату (без threadId)
             await botClient.SendTextMessageAsync(
@@ -149,7 +150,20 @@ public class CallbackQueryHandler
 
         string targetTitle = data == "tru_all" ? "ALL" : data.Split('|')[1];
         var allTasks = await _sheetsService.GetTitlesTasksAsync();
+        
+        // Отримуємо словник з гугл таблиць (де Key - Псевдонім, Value - Тег)
         var teamTags = await _sheetsService.GetTeamTagsAsync();
+
+        // Створюємо ЗВОРОТНИЙ словник: шукаємо псевдонім за тегом
+        var tagToPseudonym = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in teamTags)
+        {
+            string cleanTag = kvp.Value.Replace("@", "").Trim();
+            if (!string.IsNullOrEmpty(cleanTag) && cleanTag != "-")
+            {
+                tagToPseudonym[cleanTag] = kvp.Key; // Наприклад: [rabbitemperor] = "Імператор кроликів"
+            }
+        }
 
         var filteredTasks = targetTitle == "ALL" 
             ? allTasks 
@@ -167,11 +181,47 @@ public class CallbackQueryHandler
                 sb.AppendLine($"📺 {epGroup.Key}:");
                 foreach (var task in epGroup)
                 {
-                    string rawName = task.Username.Trim();
-                    string userPing = (teamTags.TryGetValue(rawName, out string tag) && tag != "-") 
-                        ? tag : (rawName.StartsWith("@") ? rawName : "@" + rawName);
+                    string original = task.Username.Trim();
+                    string rawName = original;
 
-                    sb.AppendLine($" ├ 👤 {userPing} — <i>{task.Role}</i>");
+                    // 1. Жорстко відрізаємо все, що йде після пробілу
+                    int spaceIndex = rawName.IndexOf(' ');
+                    if (spaceIndex > 0) rawName = rawName.Substring(0, spaceIndex);
+
+                    // 2. Жорстко відрізаємо все, що йде після дужки (якщо пробілу не було)
+                    int bracketIndex = rawName.IndexOf('(');
+                    if (bracketIndex > 0) rawName = rawName.Substring(0, bracketIndex);
+
+                    // 3. Чистимо від @ і зайвих пробілів
+                    rawName = rawName.Replace("@", "").Trim();
+                    
+                    // За замовчуванням ставимо тег (якщо не знайдемо в базі)
+                    string displayName = string.IsNullOrEmpty(rawName) ? original : "@" + rawName;
+
+                    // 4. Шукаємо в словнику Команди
+                    if (!string.IsNullOrEmpty(rawName) && teamTags != null)
+                    {
+                        foreach (var kvp in teamTags)
+                        {
+                            string cleanKey = kvp.Key?.Replace("@", "").Trim() ?? "";
+                            string cleanValue = kvp.Value?.Replace("@", "").Trim() ?? "";
+
+                            // Якщо знайшли тег у колонці значень -> беремо псевдонім
+                            if (cleanValue.Equals(rawName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                displayName = kvp.Key; 
+                                break;
+                            }
+                            // Якщо словник раптом перевернутий -> беремо іншу колонку
+                            else if (cleanKey.Equals(rawName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                displayName = kvp.Value;
+                                break;
+                            }
+                        }
+                    }
+
+                    sb.AppendLine($" ├ 👤 {displayName} — <i>{task.Role}</i>");
                 }
                 sb.AppendLine();
             }
