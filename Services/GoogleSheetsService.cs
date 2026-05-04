@@ -383,7 +383,8 @@ public class GoogleSheetsService : IGoogleSheetsService
                     var cleanLine = line.Trim();
                     if (string.IsNullOrEmpty(cleanLine)) continue;
                     // ВІДНОВЛЕНО: Пошук по слову "Серія:"
-                    if (cleanLine.EndsWith("Серія:"))
+                    // Універсальний пошук заголовка: шукаємо рядок, що закінчується на двокрапку (наприклад "2 епізод:" або "1 Серія:")
+                    if (cleanLine.EndsWith(":") && !cleanLine.Contains("<"))
                     {
                         currentEpisode = cleanLine.Replace(":", "").Trim();
                         continue;
