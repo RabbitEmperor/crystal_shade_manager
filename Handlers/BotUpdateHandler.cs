@@ -42,9 +42,15 @@ public class BotUpdateHandler
 
             if (text.StartsWith("/"))
             {
-                if (!await IsAdminAsync(bot, message.Chat.Id, message.From!.Id, token)) return;
-                
+                // Визначаємо команду ДО перевірки на адміна
                 string commandName = text.Split(' ')[0].Split('@')[0];
+                
+                // ДОЗВОЛЯЄМО /my_task ДЛЯ ВСІХ. Для інших команд — перевіряємо адмінку.
+                if (commandName != "/my_task" && !await IsAdminAsync(bot, message.Chat.Id, message.From!.Id, token)) 
+                {
+                    return; // Якщо не адмін і не my_task — ігноруємо
+                }
+
                 var command = _commands.FirstOrDefault(c => c.Trigger == commandName);
 
                 if (command != null)

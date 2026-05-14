@@ -14,5 +14,5 @@ public interface IGoogleSheetsService
     Task<List<crystal_shade_manager.Models.TitleTask>> GetTitlesTasksAsync();
     // Додай цей рядок туди, де в тебе інші методи:
     Task<Dictionary<string, string>> GetTeamTagsAsync();
-
+    Task<List<crystal_shade_manager.Models.TitleTask>> GetUserDebtsAsync(string nickname, string tag);
 }
