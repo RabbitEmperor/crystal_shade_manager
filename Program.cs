@@ -20,9 +20,8 @@ Console.WriteLine("🚀 Запуск Crystal Manager SOLID Edition...");
 // --- Блок для Render (Health Check) ---
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
-app.MapGet("/", () => "Crystal Manager is Alive!");
+app.MapMethods("/", new[] { "GET", "HEAD" }, () => "Crystal Manager is Alive!");
 _ = app.RunAsync(); 
-// --------------------------------------
 
 IGoogleSheetsService sheetsService = new GoogleSheetsService();
 IStateManager stateManager = new StateManager();
