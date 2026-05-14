@@ -449,4 +449,70 @@ public class GoogleSheetsService : IGoogleSheetsService
         catch (System.Exception ex) { System.Console.WriteLine($"Помилка 'Команда': {ex.Message}"); }
         return tagsDict;
     }
+    public async Task<List<crystal_shade_manager.Models.TitleTask>> GetUserDebtsAsync(string nickname, string tag)
+    {
+        var debts = new List<crystal_shade_manager.Models.TitleTask>();
+        try
+        {
+            var request = _service.Spreadsheets.Get(Config.SheetId);
+            var spreadsheet = await request.ExecuteAsync();
+
+            foreach (var sheet in spreadsheet.Sheets)
+            {
+                string sheetName = sheet.Properties.Title;
+                
+                // Пропускаємо системні аркуші
+                if (sheetName == "Тайтли" || sheetName == "Команда" || sheetName == "Налаштування" || sheetName == "Словник") continue; 
+
+                var dataRequest = _service.Spreadsheets.Values.Get(Config.SheetId, $"'{sheetName}'!A:F");
+                var response = await dataRequest.ExecuteAsync();
+                var values = response.Values;
+
+                if (values == null) continue;
+
+                foreach (var row in values)
+                {
+                    // Пропускаємо порожні рядки або рядки заголовків таблиці (наприклад, де написано "Серія" або "Завдання")
+                    if (row.Count < 6) continue;
+                    
+                    // Читаємо значення з усіх колонок
+                    string episode = row[0]?.ToString()?.Trim() ?? "";   // Колонка A (Серія)
+                    string role = row[1]?.ToString()?.Trim() ?? "";      // Колонка B (Завдання)
+                    string character = row[2]?.ToString()?.Trim() ?? ""; // Колонка C (Персонаж)
+                    string actor = row[3]?.ToString()?.Trim() ?? "";     // Колонка D (Учасник)
+                    string deadline = row[4]?.ToString()?.Trim() ?? "";  // Колонка E (Дедлайн)
+                    string status = row[5]?.ToString()?.Trim() ?? "";    // Колонка F (Статус)
+
+                    // Якщо в колонці "Серія" написано слово "Серія" (це шапка таблиці) - пропускаємо рядок
+                    if (episode.Equals("Серія", StringComparison.OrdinalIgnoreCase)) continue;
+                    
+                    // Якщо серія порожня, або немає актора - пропускаємо
+                    if (string.IsNullOrEmpty(episode) || string.IsNullOrEmpty(actor)) continue;
+
+                    // Перевіряємо, чи це наш юзер
+                    bool isOurUser = actor.Equals(nickname, StringComparison.OrdinalIgnoreCase) || 
+                                     actor.Equals(tag, StringComparison.OrdinalIgnoreCase);
+
+                    // Перевіряємо статус (ТІЛЬКИ "виконується" або "правки")
+                    bool isDebtStatus = status.Equals("виконується", StringComparison.OrdinalIgnoreCase) || 
+                                        status.Equals("правки", StringComparison.OrdinalIgnoreCase);
+
+                    // Якщо юзер збігся і статус підходить — додаємо в борг
+                    if (isOurUser && isDebtStatus)
+                    {
+                        debts.Add(new crystal_shade_manager.Models.TitleTask
+                        {
+                            TitleName = sheetName,
+                            Episode = episode, // Тепер беремо серію прямо з колонки А!
+                            Role = role,
+                            Character = character,
+                            Deadline = deadline
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"Помилка боргів: {ex.Message}"); }
+        return debts;
+    }
 }

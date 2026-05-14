@@ -42,7 +42,9 @@ var commands = new List<ITelegramCommand>
     new RiseUpCommand(stateManager),
     new CastCommand(sheetsService),
     new CorrectionsCommand(sheetsService),
-    new TitlesRiseUpCommand(sheetsService) 
+    new TitlesRiseUpCommand(sheetsService),
+    new TitlesRiseUpCommand(sheetsService),
+    new DebtsCommand(sheetsService)
 };
 
 var callbackHandler = new CallbackQueryHandler(stateManager, sheetsService);
