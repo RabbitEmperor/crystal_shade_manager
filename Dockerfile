@@ -1,7 +1,7 @@
 # ЕТАП 1: Збірка (Build)
 # Використовуємо офіційний образ .NET SDK для компіляції коду
 # (Якщо в тебе .NET 7 або 9, зміни 8.0 на свою версію)
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /src
 
 # Копіюємо файл проєкту і відновлюємо залежності (NuGet пакети)
@@ -20,7 +20,7 @@ RUN dotnet publish "crystal_shade_manager.csproj" -c Release -o /app/publish /p:
 
 # ЕТАП 2: Запуск (Runtime)
 # Використовуємо легкий образ тільки з Runtime (без інструментів розробки)
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS final
+FROM mcr.microsoft.com/dotnet/runtime:10.0-preview
 WORKDIR /app
 
 # Копіюємо скомпільовані файли з першого етапу
