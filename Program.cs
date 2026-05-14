@@ -11,9 +11,17 @@ using crystal_shade_manager.State;
 using crystal_shade_manager.Commands;
 using crystal_shade_manager.Handlers;
 using crystal_shade_manager.Services;
+using Microsoft.AspNetCore.Builder;
 
 Console.OutputEncoding = Encoding.UTF8;
 Console.WriteLine("Запуск Crystal Manager SOLID Edition...");
+
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+app.MapGet("/", () => "Crystal Manager is Alive!");
+_ = app.RunAsync(); // Запускаємо в фоні
+
+Console.WriteLine("🚀 Запуск Crystal Manager SOLID Edition...");
 
 IGoogleSheetsService sheetsService = new GoogleSheetsService();
 IStateManager stateManager = new StateManager();
