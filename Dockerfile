@@ -1,35 +1,28 @@
-# ЕТАП 1: Збірка (Build)
-# Використовуємо офіційний образ .NET SDK для компіляції коду
-# (Якщо в тебе .NET 7 або 9, зміни 8.0 на свою версію)
+# Етап 1: Збірка (Build)
 FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /src
 
-# Копіюємо файл проєкту і відновлюємо залежності (NuGet пакети)
+# Копіюємо проект та відновлюємо залежності
 COPY ["crystal_shade_manager.csproj", "./"]
 RUN dotnet restore "crystal_shade_manager.csproj"
 
-# Копіюємо весь інший вихідний код
+# Копіюємо все інше та публікуємо
 COPY . .
-WORKDIR "/src/"
-
-# Збираємо проєкт у режимі Release
-RUN dotnet build "crystal_shade_manager.csproj" -c Release -o /app/build
-
-# Публікуємо готовий додаток
 RUN dotnet publish "crystal_shade_manager.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# ЕТАП 2: Запуск (Runtime)
-# Використовуємо легкий образ тільки з Runtime (без інструментів розробки)
-FROM mcr.microsoft.com/dotnet/runtime:10.0-preview
+# Етап 2: Запуск (Runtime)
+# ВАЖЛИВО: Використовуємо aspnet замість runtime, щоб підтримувати веб-частину
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview
 WORKDIR /app
 
-# Копіюємо скомпільовані файли з першого етапу
+# Копіюємо зібрані файли
 COPY --from=build /app/publish .
 
-# ВАЖЛИВО: Встановлюємо часовий пояс (щоб логи і час в таблиці гугла були правильними)
-# За замовчуванням ставимо Київський час
+# Налаштування часового поясу (Київ)
 ENV TZ=Europe/Kyiv
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# В образі aspnet (на базі Debian/Alpine) команди налаштування можуть відрізнятися, 
+# але ENV TZ зазвичай достатньо для .NET
+ENV ASPNETCORE_URLS=http://+:10000
 
-# Запускаємо бота
+# Точка входу
 ENTRYPOINT ["dotnet", "crystal_shade_manager.dll"]
