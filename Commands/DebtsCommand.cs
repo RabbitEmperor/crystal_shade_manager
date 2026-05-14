@@ -27,12 +27,23 @@ public class DebtsCommand : ITelegramCommand
         string username = message.From?.Username;
         if (string.IsNullOrEmpty(username))
         {
-            await botClient.SendTextMessageAsync(message.Chat.Id, "❌ У тебе не встановлено юзернейм (@) в налаштуваннях Telegram. Я не можу тебе ідентифікувати.", cancellationToken: ct);
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                messageThreadId: message.MessageThreadId,
+                text: "❌ У тебе не встановлено юзернейм (@) в налаштуваннях Telegram. Я не можу тебе ідентифікувати.",
+                cancellationToken: ct
+            );
             return;
         }
 
         string userTag = "@" + username;
-        var loadingMsg = await botClient.SendTextMessageAsync(message.Chat.Id, "⏳ <b>Перевіряю всі тайтли на наявність боргів...</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+        var loadingMsg = await botClient.SendTextMessageAsync(
+            chatId: message.Chat.Id,
+            messageThreadId: message.MessageThreadId, // <-- Магія для гілок Форуму!
+            text: "⏳ <b>Перевіряю всі тайтли на наявність боргів...</b>",
+            parseMode: ParseMode.Html,
+            cancellationToken: ct
+        );
 
         // 1. Отримуємо псевдонім зі словника команди
         var teamTags = await _sheetsService.GetTeamTagsAsync();
