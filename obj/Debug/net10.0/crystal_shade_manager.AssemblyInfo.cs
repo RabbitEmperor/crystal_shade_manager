@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("crystal_shade_manager")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cafa81f5532f4fe1fdfa15004ae254781e47a3c4")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+eff7a309c25d09f5a15dc694094b564f25456c09")]
 [assembly: System.Reflection.AssemblyProductAttribute("crystal_shade_manager")]
 [assembly: System.Reflection.AssemblyTitleAttribute("crystal_shade_manager")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
