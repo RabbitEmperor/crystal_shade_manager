@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
@@ -14,7 +16,6 @@ public class RiseUpCommand : ITelegramCommand
     private readonly IStateManager _state;
     public string Trigger => "/rise_up";
 
-    
     public RiseUpCommand(IStateManager state)
     {
         _state = state;
@@ -25,19 +26,19 @@ public class RiseUpCommand : ITelegramCommand
         if (message.Chat == null) return;
 
         var chatId = message.Chat.Id;
-        
+        var threadId = message.MessageThreadId;
         var cache = _state.CachedUserMessages;
+
+        // ОДНА чітка перевірка кешу замість трьох дублікатів
         if (cache == null || cache.Count == 0)
         {
-            await botClient.SendTextMessageAsync(chatId, "❌ Немає завдань для розсилки. Оновіть таблицю командою /refresh", cancellationToken: token);
-            return;
-        }
-        
-        var threadId = message.MessageThreadId;
-
-        if (_state.CachedUserMessages.Count == 0)
-        {
-            await botClient.SendTextMessageAsync(chatId, "Немає завдань (пропишіть /refresh)", messageThreadId: threadId, cancellationToken: token);
+            await botClient.SendTextMessageAsync(
+                chatId: chatId, 
+                messageThreadId: threadId,
+                text: "❌ <b>У кеші немає даних для розсилки.</b> Спершу виконайте команду /refresh", 
+                parseMode: ParseMode.Html,
+                cancellationToken: token
+            );
             return;
         }
 
@@ -45,12 +46,7 @@ public class RiseUpCommand : ITelegramCommand
         var session = new RiseUpSession();
         int index = 0;
         
-        if (cache == null || cache.Count == 0) 
-        {
-            return;
-        }
-        
-        foreach (var kvp in _state.CachedUserMessages)
+        foreach (var kvp in cache)
         {
             session.Users.Add(kvp.Key);
             session.Toggles[index] = settings.SelectAllByDefault;
@@ -58,8 +54,15 @@ public class RiseUpCommand : ITelegramCommand
             index++;
         }
         
-        var waitMsg = await botClient.SendTextMessageAsync(chatId, "📋 <b>Оберіть рабів для розсилки:</b>", 
-            messageThreadId: threadId, replyMarkup: KeyboardBuilder.Build(session), parseMode: ParseMode.Html, cancellationToken: token);
+        // Виправляємо текст панелі, щоб не було знаків питання
+        var waitMsg = await botClient.SendTextMessageAsync(
+            chatId: chatId, 
+            messageThreadId: threadId, 
+            replyMarkup: KeyboardBuilder.Build(session), 
+            text: "⚙️ <b>Панель керування розсилкою розгорнуто. Оберіть учасників:</b>", 
+            parseMode: ParseMode.Html, 
+            cancellationToken: token
+        );
         
         _state.ActiveSessions[$"{chatId}_{waitMsg.MessageId}"] = session;
     }
