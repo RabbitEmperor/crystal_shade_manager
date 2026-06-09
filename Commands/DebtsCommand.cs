@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
@@ -8,12 +11,14 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using crystal_shade_manager.Interfaces;
 using crystal_shade_manager.Services;
+using File = System.IO.File;
 
 namespace crystal_shade_manager.Commands;
 
 public class DebtsCommand : ITelegramCommand
 {
     private readonly IGoogleSheetsService _sheetsService;
+    private const string JokesFileName = "user_jokes.json";
 
     public DebtsCommand(IGoogleSheetsService sheetsService)
     {
@@ -39,8 +44,8 @@ public class DebtsCommand : ITelegramCommand
         string userTag = "@" + username;
         var loadingMsg = await botClient.SendTextMessageAsync(
             chatId: message.Chat.Id,
-            messageThreadId: message.MessageThreadId, // <-- Магія для гілок Форуму!
-            text: "⏳ <b>Перевіряю всі тайтли на наявність боргів...</b>",
+            messageThreadId: message.MessageThreadId, 
+            text: "⏳ <b>Перевіряю всі тайтли...</b>",
             parseMode: ParseMode.Html,
             cancellationToken: ct
         );
@@ -61,41 +66,90 @@ public class DebtsCommand : ITelegramCommand
         // 2. Шукаємо борги
         var debts = await _sheetsService.GetUserDebtsAsync(userNickname, userTag);
 
-        // 3. Якщо боргів немає
+        // 3. Якщо боргів немає — витягуємо персональний прикол з JSON
         if (debts == null || !debts.Any())
         {
-            string noDebtsMsg = "🎉 " + userTag + ", <b>у тебе немає боргів! Ти просто котик!</b>";
-            await botClient.EditMessageTextAsync(message.Chat.Id, loadingMsg.MessageId, noDebtsMsg, parseMode: ParseMode.Html, cancellationToken: ct);
+            string customMessage = "🎉 " + userTag + ", <b>у тебе немає боргів! Ти просто котик!</b>";
+            
+            try
+            {
+                // Піднімаємося до кореня проєкту
+                string projectRoot = AppDomain.CurrentDomain.BaseDirectory;
+                while (!File.Exists(Path.Combine(projectRoot, "Program.cs")) && Directory.GetParent(projectRoot) != null)
+                {
+                    projectRoot = Directory.GetParent(projectRoot).FullName;
+                }
+
+                string jokesPath = Path.Combine(projectRoot, JokesFileName);
+                if (File.Exists(jokesPath))
+                {
+                    string jsonString = await File.ReadAllTextAsync(jokesPath, ct);
+                    
+                    // Десеріалізуємо у тимчасовий словник
+                    var rawDict = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonString);
+                    
+                    if (rawDict != null)
+                    {
+                        // Переливаємо дані у словник, який ЗАЛІЗОБЕТОННО ігнорує регістр символів
+                        var jokesDict = new Dictionary<string, string>(rawDict, StringComparer.OrdinalIgnoreCase);
+
+                        string cleanUsername = username.Trim();
+                        
+                        // Тепер пошук відпрацює ідеально, незалежно від великих/малих літер
+                        if (jokesDict.TryGetValue(cleanUsername, out string jokeText))
+                        {
+                            if (!string.IsNullOrWhiteSpace(jokeText))
+                            {
+                                customMessage = jokeText;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Помилка зчитування файлу приколів user_jokes.json: {ex.Message}");
+            }
+
+            await botClient.EditMessageTextAsync(message.Chat.Id, loadingMsg.MessageId, customMessage, parseMode: ParseMode.Html, cancellationToken: ct);
             return;
         }
 
-        // 4. Формуємо красивий список
+        // 4. Формуємо список з гілочками (якщо борги є)
         var sb = new StringBuilder();
         
-        // Використовуємо класичне зшивання рядків (+), щоб компілятор не сходив з розуму
-        string header = "📋 <b>Борги для " + userNickname + "</b>:\n";
-        sb.AppendLine(header);
+        sb.AppendLine("📋 <b>Борги: " + userNickname + "</b>\n");
 
         var groupedByTitle = debts.GroupBy(d => d.TitleName);
         foreach (var title in groupedByTitle)
         {
-            string titleStr = "🎬 <b>" + title.Key + "</b>";
-            sb.AppendLine(titleStr);
+            sb.AppendLine("🎬 <b>" + title.Key + "</b>");
             
             var groupedByEp = title.GroupBy(d => d.Episode);
             foreach (var ep in groupedByEp)
             {
-                string epStr = " 📺 " + ep.Key + ":";
-                sb.AppendLine(epStr);
+                sb.AppendLine(" 📺 Епізод " + ep.Key + ":");
                 
-                foreach (var task in ep)
+                var tasksList = ep.ToList();
+                for (int i = 0; i < tasksList.Count; i++)
                 {
+                    var task = tasksList[i];
                     string deadlineText = string.IsNullOrEmpty(task.Deadline) ? "без дедлайну" : "⏰ " + task.Deadline;
-                    string taskStr = "  ├ 👤 " + task.Character + " <i>(" + task.Role + ")</i> — " + deadlineText;
+                    
+                    string statusAlert = "";
+                    if (task.Status != null && task.Status.Equals("правки", StringComparison.OrdinalIgnoreCase))
+                    {
+                        statusAlert = "❗️<b>[ПРАВКИ]</b> "; 
+                    }
+
+                    string charText = string.IsNullOrWhiteSpace(task.Character) ? "" : "<b>" + task.Character + "</b> ";
+                    string branch = (i == tasksList.Count - 1) ? "    └ " : "    ├ ";
+
+                    string taskStr = branch + statusAlert + charText + "<i>(" + task.Role + ")</i> — " + deadlineText;
                     sb.AppendLine(taskStr);
                 }
             }
-            sb.AppendLine(); // Пустий рядок між тайтлами
+            sb.AppendLine(); 
         }
 
         await botClient.EditMessageTextAsync(message.Chat.Id, loadingMsg.MessageId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);

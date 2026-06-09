@@ -8,4 +8,5 @@ public class TitleTask
     public string Role { get; set; }
     public string Character { get; set; }
     public string Deadline { get; set; }
+    public string Status { get; set; }
 }

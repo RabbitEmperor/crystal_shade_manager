@@ -42,7 +42,6 @@ public class GoogleSheetsService : IGoogleSheetsService
         
         try
         {
-            // ВІДНОВЛЕНО: Назва аркуша "Команда"
             var teamData = await _service.Spreadsheets.Values.Get(Config.SheetId, "'Команда'!A2:C").ExecuteAsync();
             if (teamData.Values == null) return dictionary;
 
@@ -74,16 +73,15 @@ public class GoogleSheetsService : IGoogleSheetsService
         return dictionary;
     }
 
-   public async Task<Dictionary<string, List<string>>> GetUserTaskMessagesAsync()
+    public async Task<Dictionary<string, List<string>>> GetUserTaskMessagesAsync()
     {
         var userTags = await GetTeamDictionaryAsync(tagToNick: false);
-        var userTasksGrouped = new Dictionary<string, Dictionary<string, HashSet<string>>>();
+        var userTasksRaw = new Dictionary<string, List<crystal_shade_manager.Models.TitleTask>>();
         
         var spreadsheet = await _service.Spreadsheets.Get(Config.SheetId).ExecuteAsync();
         var validSheets = spreadsheet.Sheets
             .Select(s => s.Properties.Title)
-            // ВІДНОВЛЕНО: Назви аркушів
-            .Where(t => t != "Команда" && !t.StartsWith("Статистика") && t != "Логи")
+            .Where(t => t != "Команда" && t != "Налаштування" && t != "Тайтли" && t != "Лог" && t != "Словник")
             .ToList();
 
         if (validSheets.Count == 0) return null;
@@ -107,69 +105,112 @@ public class GoogleSheetsService : IGoogleSheetsService
                 var status = row[5].ToString()?.Trim().ToLower(); 
                 var participant = row[3].ToString()?.Trim();     
 
-                // ВІДНОВЛЕНО: Статуси
-                bool isActiveStatus = status == "виконується" || status == "готово" || status == "true";
+                bool isActiveStatus = status == "виконується" || status == "правки" || status == "true";
 
                 if (string.IsNullOrEmpty(participant) || !isActiveStatus || !userTags.ContainsKey(participant)) 
                     continue; 
 
                 var taskName = row.Count > 1 ? row[1].ToString()?.Trim() : "Завдання"; 
                 var episode = row.Count > 0 ? row[0].ToString()?.Trim() : "";          
+                var character = row.Count > 2 ? row[2].ToString()?.Trim() : "";
+                var deadline = row.Count > 4 ? row[4].ToString()?.Trim() : "";
 
-                if (taskName?.ToUpper() == "TRUE") taskName = "Основна роль";
+                if (taskName?.ToUpper() == "TRUE") taskName = "Головна роль";
 
-                string safeTaskName = taskName.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-                string statusIcon = status == "готово" ? "✅" : "⏳";
-                string projectKey = $"{statusIcon} <b>{title}</b> (Еп. {episode})";
+                if (!userTasksRaw.ContainsKey(participant))
+                    userTasksRaw[participant] = new List<crystal_shade_manager.Models.TitleTask>();
 
-                if (!userTasksGrouped.ContainsKey(participant))
-                    userTasksGrouped[participant] = new Dictionary<string, HashSet<string>>();
-                
-                if (!userTasksGrouped[participant].ContainsKey(projectKey))
-                    userTasksGrouped[participant][projectKey] = new HashSet<string>();
-
-                userTasksGrouped[participant][projectKey].Add(safeTaskName);
+                userTasksRaw[participant].Add(new crystal_shade_manager.Models.TitleTask
+                {
+                    TitleName = title,
+                    Episode = episode,
+                    Role = taskName,
+                    Character = character,
+                    Deadline = deadline,
+                    Status = status
+                });
             }
         }
 
-        if (userTasksGrouped.Count == 0) return null;
+        if (userTasksRaw.Count == 0) return null;
 
-        return FormatUserMessages(userTasksGrouped, userTags);
+        return FormatUserMessages(userTasksRaw, userTags);
     }
 
     private Dictionary<string, List<string>> FormatUserMessages(
-        Dictionary<string, Dictionary<string, HashSet<string>>> userTasksGrouped, 
+        Dictionary<string, List<crystal_shade_manager.Models.TitleTask>> userTasksRaw, 
         Dictionary<string, string> userTags)
     {
         var resultMessages = new Dictionary<string, List<string>>();
 
-        foreach (var userKvp in userTasksGrouped)
+        foreach (var userKvp in userTasksRaw)
         {
             var rawNick = userKvp.Key; 
-            var projects = userKvp.Value;
+            var tasks = userKvp.Value;
 
-            string safeNick = rawNick.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
             string tag = userTags.ContainsKey(rawNick) ? userTags[rawNick] : rawNick;
             string safeTag = tag.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
             var userMsgList = new List<string>();
             var sb = new StringBuilder();
-            sb.AppendLine($"👤 {safeTag}, ваші поточні завдання:");
+            
+            sb.AppendLine($"👤 {safeTag}, ваші поточні завдання:\n");
 
-            foreach (var projKvp in projects)
+            // 1. Групуємо по Аніме (Тайтлу)
+            var groupedByTitle = tasks.GroupBy(t => t.TitleName);
+            foreach (var titleGroup in groupedByTitle)
             {
-                string taskLine = $"{projKvp.Key}: {string.Join(", ", projKvp.Value)}";
-
-                if (sb.Length + taskLine.Length > 4000)
+                string safeTitle = titleGroup.Key.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+                sb.AppendLine($"🎬 <b>{safeTitle}</b>");
+                
+                // 2. Групуємо всередині аніме по Епізодах
+                var groupedByEp = titleGroup.GroupBy(t => t.Episode);
+                foreach (var epGroup in groupedByEp)
                 {
-                    userMsgList.Add(sb.ToString());
-                    sb.Clear();
-                    sb.AppendLine($"👤 {safeTag} (продовження списку):");
+                    string safeEp = epGroup.Key.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+                    sb.AppendLine($"  📺 Епізод {safeEp}:");
+                    
+                    var tasksList = epGroup.ToList();
+                    for (int i = 0; i < tasksList.Count; i++)
+                    {
+                        var task = tasksList[i];
+                        
+                        string statusAlert = "";
+                        if (task.Status != null && task.Status.Equals("правки", StringComparison.OrdinalIgnoreCase))
+                        {
+                            statusAlert = "❗️<b>[ПРАВКИ]</b> ";
+                        }
+
+                        string safeChar = task.Character?.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;") ?? "";
+                        string safeRole = task.Role?.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;") ?? "";
+                        string safeDeadline = task.Deadline?.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;") ?? "";
+
+                        string charText = string.IsNullOrWhiteSpace(safeChar) ? "" : $"<b>{safeChar}</b> ";
+                        string deadlineText = string.IsNullOrEmpty(safeDeadline) ? "без дедлайну" : "⏰ " + safeDeadline;
+                        
+                        // Магія гілочок: └ для останнього таска в серії, ├ для решти
+                        string branch = (i == tasksList.Count - 1) ? "    └ " : "    ├ ";
+                        string taskLine = $"{branch}{statusAlert}{charText}<i>({safeRole})</i> — {deadlineText}";
+
+                        // Перевірка на ліміт довжини повідомлення Телеграму (4000 символів)
+                        if (sb.Length + taskLine.Length > 4000)
+                        {
+                            userMsgList.Add(sb.ToString());
+                            sb.Clear();
+                            sb.AppendLine($"👤 {safeTag} (Продовження списку):\n");
+                            sb.AppendLine($"🎬 <b>{safeTitle}</b>");
+                            sb.AppendLine($"  📺 Епізод {safeEp}:");
+                        }
+                        
+                        sb.AppendLine(taskLine);
+                    }
                 }
-                sb.AppendLine(taskLine);
+                sb.AppendLine(); // Порожній рядок між аніме для повітря
             }
             
             userMsgList.Add(sb.ToString());
+            
+            string safeNick = rawNick.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
             resultMessages[safeNick] = userMsgList; 
         }
 
@@ -181,8 +222,7 @@ public class GoogleSheetsService : IGoogleSheetsService
         var values = new List<object> { DateTime.Now.ToString("dd.MM.yyyy HH:mm"), userName, action };
         var valueRange = new ValueRange { Values = new List<IList<object>> { values } };
 
-        // ВІДНОВЛЕНО: Назва аркуша "Логи"
-        var appendRequest = _service.Spreadsheets.Values.Append(valueRange, Config.SheetId, "'Логи'!A:C");
+        var appendRequest = _service.Spreadsheets.Values.Append(valueRange, Config.SheetId, "'Лог'!A:C");
         appendRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.USERENTERED;
 
         await appendRequest.ExecuteAsync();
@@ -193,28 +233,19 @@ public class GoogleSheetsService : IGoogleSheetsService
         var tagToNick = await GetTeamDictionaryAsync(tagToNick: true);
         var rows = new List<IList<object>>();
 
-        // Додаємо заголовок (номер епізоду)
         rows.Add(new List<object> { episode });
 
-        // 1. Створюємо тимчасовий список, щоб зберегти очищені дані ПЕРЕД записом
         var processedCast = new List<(string Character, string FinalActor)>();
 
         foreach (var member in cast)
         {
-            // Очищаємо тег від " (1 репліка)" та іншого сміття
             string cleanTag = member.Actor.Split(new[] { ' ', '(', '\u00A0' }, StringSplitOptions.RemoveEmptyEntries)[0].Replace("@", "").Trim();
-
-            // Шукаємо псевдонім (наприклад, "Чагарник")
             string finalActor = tagToNick.ContainsKey(cleanTag) ? tagToNick[cleanTag] : "@" + cleanTag;
-
-            // Зберігаємо в тимчасовий список
             processedCast.Add((member.Character, finalActor));
         }
 
-        // 2. СОРТУЄМО список по псевдонімах акторів (однакові імена стануть поруч)
         var sortedCast = processedCast.OrderBy(m => m.FinalActor).ToList();
 
-        // 3. Тепер записуємо вже ВІДСОРТОВАНИЙ список у рядки для таблиці
         foreach (var member in sortedCast)
         {
             rows.Add(new List<object> 
@@ -222,10 +253,10 @@ public class GoogleSheetsService : IGoogleSheetsService
                 episode,             
                 "Дабер",             
                 member.Character,    
-                member.FinalActor,   // Сюди потрапить уже красивий псевдонім  
+                member.FinalActor,  
                 deadline,            
                 "Виконується",       
-                ""                   
+                ""                    
             });
         }
 
@@ -263,7 +294,6 @@ public class GoogleSheetsService : IGoogleSheetsService
                     var batchRequests = new List<Request>
                     {
                         new Request { MergeCells = new MergeCellsRequest { Range = gridRange, MergeType = "MERGE_ALL" } },
-                        
                         new Request
                         {
                             RepeatCell = new RepeatCellRequest
@@ -312,7 +342,7 @@ public class GoogleSheetsService : IGoogleSheetsService
         var rows = response.Values;
 
         if (rows == null || rows.Count == 0) 
-            throw new Exception("Дані таблиці пусті або не зчитані.");
+            throw new Exception("Дані аркуша порожні або не знайдені.");
 
         var dataToUpdate = new List<ValueRange>();
 
@@ -344,7 +374,7 @@ public class GoogleSheetsService : IGoogleSheetsService
         }
 
         if (dataToUpdate.Count == 0)
-            throw new Exception($"Не знайдено акторів у списку правок в епізоді {episode}.");
+            throw new Exception($"Не знайдено актора в даному тайтлі з номером серії {episode}.");
 
         var batchUpdateRequest = new BatchUpdateValuesRequest
         {
@@ -361,7 +391,6 @@ public class GoogleSheetsService : IGoogleSheetsService
         var tasks = new List<crystal_shade_manager.Models.TitleTask>();
         try
         {
-            // ВІДНОВЛЕНО: Назва аркуша "Тайтли"
             var request = _service.Spreadsheets.Values.Get(Config.SheetId, "'Тайтли'!A2:C");
             var response = await request.ExecuteAsync();
             var values = response.Values;
@@ -382,8 +411,6 @@ public class GoogleSheetsService : IGoogleSheetsService
                 {
                     var cleanLine = line.Trim();
                     if (string.IsNullOrEmpty(cleanLine)) continue;
-                    // ВІДНОВЛЕНО: Пошук по слову "Серія:"
-                    // Універсальний пошук заголовка: шукаємо рядок, що закінчується на двокрапку (наприклад "2 епізод:" або "1 Серія:")
                     if (cleanLine.EndsWith(":") && !cleanLine.Contains("<"))
                     {
                         currentEpisode = cleanLine.Replace(":", "").Trim();
@@ -413,7 +440,6 @@ public class GoogleSheetsService : IGoogleSheetsService
         var tagsDict = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
         try
         {
-            // ВІДНОВЛЕНО: Назва аркуша "Команда"
             var request = _service.Spreadsheets.Values.Get(Config.SheetId, "'Команда'!A2:C");
             var response = await request.ExecuteAsync();
             var values = response.Values;
@@ -449,6 +475,7 @@ public class GoogleSheetsService : IGoogleSheetsService
         catch (System.Exception ex) { System.Console.WriteLine($"Помилка 'Команда': {ex.Message}"); }
         return tagsDict;
     }
+
     public async Task<List<crystal_shade_manager.Models.TitleTask>> GetUserDebtsAsync(string nickname, string tag)
     {
         var debts = new List<crystal_shade_manager.Models.TitleTask>();
@@ -461,8 +488,7 @@ public class GoogleSheetsService : IGoogleSheetsService
             {
                 string sheetName = sheet.Properties.Title;
                 
-                // Пропускаємо системні аркуші
-                if (sheetName == "Тайтли" || sheetName == "Команда" || sheetName == "Налаштування" || sheetName == "Словник") continue; 
+                if (sheetName == "Тайтли" || sheetName == "Команда" || sheetName == "Налаштування" || sheetName == "Словник" || sheetName == "Лог") continue; 
 
                 var dataRequest = _service.Spreadsheets.Values.Get(Config.SheetId, $"'{sheetName}'!A:F");
                 var response = await dataRequest.ExecuteAsync();
@@ -472,41 +498,34 @@ public class GoogleSheetsService : IGoogleSheetsService
 
                 foreach (var row in values)
                 {
-                    // Пропускаємо порожні рядки або рядки заголовків таблиці (наприклад, де написано "Серія" або "Завдання")
                     if (row.Count < 6) continue;
                     
-                    // Читаємо значення з усіх колонок
-                    string episode = row[0]?.ToString()?.Trim() ?? "";   // Колонка A (Серія)
-                    string role = row[1]?.ToString()?.Trim() ?? "";      // Колонка B (Завдання)
-                    string character = row[2]?.ToString()?.Trim() ?? ""; // Колонка C (Персонаж)
-                    string actor = row[3]?.ToString()?.Trim() ?? "";     // Колонка D (Учасник)
-                    string deadline = row[4]?.ToString()?.Trim() ?? "";  // Колонка E (Дедлайн)
-                    string status = row[5]?.ToString()?.Trim() ?? "";    // Колонка F (Статус)
+                    string episode = row[0]?.ToString()?.Trim() ?? "";   
+                    string role = row[1]?.ToString()?.Trim() ?? "";      
+                    string character = row[2]?.ToString()?.Trim() ?? ""; 
+                    string actor = row[3]?.ToString()?.Trim() ?? "";     
+                    string deadline = row[4]?.ToString()?.Trim() ?? "";  
+                    string status = row[5]?.ToString()?.Trim() ?? "";    
 
-                    // Якщо в колонці "Серія" написано слово "Серія" (це шапка таблиці) - пропускаємо рядок
                     if (episode.Equals("Серія", StringComparison.OrdinalIgnoreCase)) continue;
-                    
-                    // Якщо серія порожня, або немає актора - пропускаємо
                     if (string.IsNullOrEmpty(episode) || string.IsNullOrEmpty(actor)) continue;
 
-                    // Перевіряємо, чи це наш юзер
                     bool isOurUser = actor.Equals(nickname, StringComparison.OrdinalIgnoreCase) || 
                                      actor.Equals(tag, StringComparison.OrdinalIgnoreCase);
 
-                    // Перевіряємо статус (ТІЛЬКИ "виконується" або "правки")
                     bool isDebtStatus = status.Equals("виконується", StringComparison.OrdinalIgnoreCase) || 
                                         status.Equals("правки", StringComparison.OrdinalIgnoreCase);
 
-                    // Якщо юзер збігся і статус підходить — додаємо в борг
                     if (isOurUser && isDebtStatus)
                     {
                         debts.Add(new crystal_shade_manager.Models.TitleTask
                         {
                             TitleName = sheetName,
-                            Episode = episode, // Тепер беремо серію прямо з колонки А!
+                            Episode = episode, 
                             Role = role,
                             Character = character,
-                            Deadline = deadline
+                            Deadline = deadline,
+                            Status = status
                         });
                     }
                 }

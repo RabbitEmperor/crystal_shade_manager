@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "23BEBRr19aI=",
+  "dgSpecHash": "X/LvVfXo3Io=",
   "success": true,
   "projectFilePath": "/home/rabbit-emperor/RiderProjects/crystal_shade_manager/crystal_shade_manager/crystal_shade_manager.csproj",
   "expectedPackageFiles": [
@@ -18,7 +18,7 @@
     "/home/rabbit-emperor/.nuget/packages/system.codedom/7.0.0/system.codedom.7.0.0.nupkg.sha512",
     "/home/rabbit-emperor/.nuget/packages/system.management/7.0.2/system.management.7.0.2.nupkg.sha512",
     "/home/rabbit-emperor/.nuget/packages/telegram.bot/22.0.0/telegram.bot.22.0.0.nupkg.sha512",
-    "/home/rabbit-emperor/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.4/microsoft.aspnetcore.app.ref.10.0.4.nupkg.sha512"
+    "/home/rabbit-emperor/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.8/microsoft.aspnetcore.app.ref.10.0.8.nupkg.sha512"
   ],
   "logs": [
     {
