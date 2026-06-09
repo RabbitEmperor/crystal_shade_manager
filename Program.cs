@@ -34,7 +34,7 @@ try {
     stateManager.CachedUserMessages = await sheetsService.GetUserTaskMessagesAsync() ?? new Dictionary<string, List<string>>();
     Console.WriteLine($"✅ Даних завантажено: {stateManager.CachedUserMessages.Count}");
     
-    // --- ЗАЛІЗОБЕТОННИЙ ПОШУК КОРЕНЯ ПРОЄКТУ НА LINUX ---
+    // --- ЗАЛІЗОБЕТОННИЙ ПОШУК КОРЕНЯ ПРОЄКТУ ---
     string projectRoot = AppDomain.CurrentDomain.BaseDirectory;
     while (!File.Exists(Path.Combine(projectRoot, "Program.cs")) && Directory.GetParent(projectRoot) != null)
     {
@@ -44,10 +44,10 @@ try {
     string jokesPath = Path.Combine(projectRoot, "user_jokes.json");
     Console.WriteLine($"📂 Реальний шлях для збереження JSON: {jokesPath}");
 
-    // Створюємо словник із підтримкою ігнорування регістру букв
-    var defaultJokes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    // Словник, який ігнорує регістр букв при перевірках
+    var existingJokes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-    // 1. Якщо файл вже є — зчитуємо його
+    // 1. Зчитуємо існуючий файл, якщо він є
     if (File.Exists(jokesPath))
     {
         try
@@ -58,10 +58,10 @@ try {
             {
                 foreach (var kvp in loadedJokes)
                 {
-                    defaultJokes[kvp.Key.Trim()] = kvp.Value;
+                    existingJokes[kvp.Key.Trim()] = kvp.Value;
                 }
             }
-            Console.WriteLine($"ℹ️ Зчитано існуючий файл. Знайдено записів: {defaultJokes.Count}");
+            Console.WriteLine($"ℹ️ Зчитано існуючий файл. Знайдено записів: {existingJokes.Count}");
         }
         catch (Exception jsonEx)
         {
@@ -69,32 +69,54 @@ try {
         }
     }
 
-    // 2. Витягуємо свіжі теги з таблиці
+    // 2. Отримуємо свіжі теги з таблиці команд
     var teamTags = await sheetsService.GetTeamTagsAsync();
     
     if (teamTags != null && teamTags.Count > 0)
     {
-        bool isUpdated = false;
+        // Створюємо новий чистий словник для збереження фінального результату
+        var finalJokes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        bool hasChanges = false;
 
+        // Спочатку переносимо ВСІ старі записи, які вже були у файлі (щоб нічого не видалити)
+        foreach (var kvp in existingJokes)
+        {
+            finalJokes[kvp.Key] = kvp.Value;
+        }
+
+        // Тепер проходимося по людях з таблиці й оновлюємо/додаємо їх
         foreach (var kvp in teamTags)
         {
             string rawTag = kvp.Value;
             if (string.IsNullOrEmpty(rawTag) || rawTag == "-") continue;
             
-            // Залишаємо оригінальний регістр із таблиці, але чистимо від @ та пробілів
             string cleanUsername = rawTag.Replace("@", "").Trim();
 
-            // Завдяки StringComparer.OrdinalIgnoreCase перевірка ContainsKey знайде користувача незалежно від регістру
-            if (!defaultJokes.ContainsKey(cleanUsername))
+            // Перевіряємо, чи є вже цей користувач у файлі (ігноруючи регістр)
+            if (finalJokes.TryGetValue(cleanUsername, out string existingValue))
             {
-                defaultJokes[cleanUsername] = $"🎉 @{cleanUsername}, <b>у тебе немає боргів! Ти просто котик!</b>";
-                isUpdated = true;
-                Console.WriteLine($"✨ Додано нового актора: {cleanUsername}");
+                // Якщо користувач є, але там записана ДЕФОЛТНА фраза, і при цьому точний ключ (регістр) у таблиці змінився
+                // (наприклад, у файлі було "crystalick_dragon", а в таблиці стало "CrysTalick_Dragon")
+                if (existingValue.Contains("Ти просто котик!") && !finalJokes.ContainsKey(cleanUsername))
+                {
+                    // Видаляємо старий ключ з неправильним регістром і перезаписуємо правильним
+                    finalJokes.Remove(cleanUsername);
+                    finalJokes[cleanUsername] = $"🎉 @{cleanUsername}, <b>у тебе немає боргів! Ти просто котик!</b>";
+                    hasChanges = true;
+                }
+                // ЯКЩО ФРАЗА КАСТОМНА (не містить "Ти просто котик!") — МИ ЇЇ НЕ ЧІПАЄМО ВЗАГАЛІ!
+            }
+            else
+            {
+                // Якщо користувача взагалі немає — додаємо як нового
+                finalJokes[cleanUsername] = $"🎉 @{cleanUsername}, <b>у тебе немає боргів! Ти просто котик!</b>";
+                hasChanges = true;
+                Console.WriteLine($"✨ Додано нового актора з таблиці: {cleanUsername}");
             }
         }
 
-        // Записуємо, якщо файлу не було або додалися нові люди
-        if (!File.Exists(jokesPath) || isUpdated)
+        // Записуємо зміни у файл, тільки якщо реально з'явилися нові люди або оновилися дефолтні теги
+        if (!File.Exists(jokesPath) || hasChanges)
         {
             var options = new JsonSerializerOptions 
             { 
@@ -102,13 +124,13 @@ try {
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping 
             };
             
-            string jsonTemplate = JsonSerializer.Serialize(defaultJokes, options);
+            string jsonTemplate = JsonSerializer.Serialize(finalJokes, options);
             await File.WriteAllTextAsync(jokesPath, jsonTemplate, Encoding.UTF8);
-            Console.WriteLine($"✅ Файл user_jokes.json успішно збережено в корінь проєкту! Усього: {defaultJokes.Count}");
+            Console.WriteLine($"✅ Файл user_jokes.json успішно синхронізовано! Усього акторів: {finalJokes.Count}");
         }
         else
         {
-            Console.WriteLine("ℹ️ Змін у таблиці акторів не виявлено. Файл залишено без змін.");
+            Console.WriteLine("ℹ️ Змін у таблиці акторів не виявлено. Кастомні жарти захищено.");
         }
     }
 
